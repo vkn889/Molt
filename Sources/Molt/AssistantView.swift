@@ -1,0 +1,108 @@
+import MoltCore
+import SwiftUI
+
+struct AssistantView: View {
+  @ObservedObject var assistant: AssistantController
+  @ObservedObject var controller: PetController
+  @FocusState private var inputFocused: Bool
+  var body: some View {
+    VStack(alignment: .leading, spacing: 16) {
+      HStack {
+        Label("Ask Molt", systemImage: "bubble.left.and.text.bubble.right").font(MoltTheme.display(24))
+        Spacer()
+        Text("LOCAL · SUGGEST").font(.caption.monospaced()).foregroundStyle(.secondary)
+      }
+      Text("Your words stay on this Mac. Only the text and project memory you select below are supplied to the model.").font(.callout)
+      HStack {
+        Button("Connect / refresh", action: assistant.refresh).disabled(assistant.running)
+        Picker("Local model", selection: $assistant.selectedModel) {
+          Text("Choose model").tag("")
+          ForEach(assistant.models) { model in
+            Text("\(model.id) · \(ByteCountFormatter.string(fromByteCount: model.bytes, countStyle: .file))").tag(model.id)
+          }
+        }.disabled(assistant.running)
+        Button("Unload", action: assistant.unload).disabled(assistant.running || assistant.selectedModel.isEmpty)
+      }
+      Text(assistant.status).font(.caption).accessibilityLabel("AI status: \(assistant.status)")
+      if let error = assistant.storageError { Text(error).foregroundStyle(.red) }
+      TextField("Ask, rewrite, explain an error, or plan your next step…", text: $assistant.draft, axis: .vertical)
+        .lineLimit(3...7).textFieldStyle(.roundedBorder).focused($inputFocused)
+      HStack {
+        Button("Attach text file", action: assistant.chooseFile)
+        Button("Paste once", action: assistant.clipboard)
+        Spacer()
+        if assistant.running { Button("Stop", action: assistant.cancel) }
+        else { Button("Send", action: assistant.send).disabled(assistant.selectedModel.isEmpty || assistant.draft.isEmpty) }
+      }
+      if !assistant.attachment.isEmpty {
+        DisclosureGroup("Supplied source: \(assistant.attachmentName)") {
+          Text(String(assistant.attachment.prefix(12000))).font(.caption.monospaced()).textSelection(.enabled)
+          Button("Remove attachment") { assistant.attachment = ""; assistant.attachmentName = "" }
+        }
+      }
+      if !assistant.reply.isEmpty {
+        MoltCard(title: "Molt's response") {
+          Text(assistant.reply).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+          HStack {
+            Button("Review saving as note") { assistant.propose(.saveNote, text: assistant.reply) }.disabled(assistant.running)
+            Button("Clear response") { assistant.reply = "" }.disabled(assistant.running)
+          }
+        }
+      }
+      projectPanel
+      MoltCard(title: "Explicit actions") {
+        Text("These controls create a concrete proposal. Nothing happens until you review and approve it.").font(.caption)
+        HStack {
+          Button("Propose task from input") { assistant.propose(.createTask, text: assistant.draft) }.disabled(assistant.draft.isEmpty)
+          Button("Propose 25-minute focus") { assistant.propose(.startFocus, text: "Focus together", minutes: 25) }
+        }
+      }
+      ForEach(assistant.workspace.jobs.reversed()) { job in
+        MoltCard(title: "\(job.proposal.tool.rawValue) · \(job.status)") {
+          Text(job.proposal.tool == .openWorkspace ? (assistant.workspace.projects.first { $0.id.uuidString == job.proposal.text }?.folder ?? "Removed project") : job.proposal.text)
+            .textSelection(.enabled)
+          if let minutes = job.proposal.minutes { Text("Duration: \(minutes) minutes") }
+          if !job.detail.isEmpty { Text(job.detail).font(.caption) }
+          if job.status == "awaiting review" {
+            HStack {
+              Button("Approve and execute") { assistant.execute(job.id, controller: controller) }.disabled(assistant.storageError != nil)
+              Button("Cancel") { assistant.dismiss(job.id) }
+            }
+          }
+        }
+      }
+      Text("Ollama is the optional development provider. The self-contained production AI installer is not yet qualified for release. No cloud fallback, shell execution, screen capture, or background clipboard collection is enabled.").font(.caption).foregroundStyle(.secondary)
+    }.onAppear { inputFocused = true }
+  }
+  private var projectPanel: some View {
+    MoltCard(title: "Projects and approved memory") {
+      HStack {
+        Picker("Project", selection: $assistant.projectID) {
+          Text("None").tag(nil as UUID?)
+          ForEach(assistant.workspace.projects) { project in Text(project.name).tag(Optional(project.id)) }
+        }
+        Button("Choose folder", action: assistant.addProject)
+      }
+      if let index = assistant.workspace.projects.firstIndex(where: { $0.id == assistant.projectID }) {
+        Text(assistant.workspace.projects[index].folder).font(.caption).textSelection(.enabled)
+        Toggle("Enable this project's scope", isOn: $assistant.workspace.projects[index].enabled)
+        TextField("Facts you want Molt to remember", text: $assistant.workspace.projects[index].facts, axis: .vertical)
+        TextField("Next step / resume checkpoint", text: $assistant.workspace.projects[index].nextStep, axis: .vertical)
+        HStack {
+          Button("Save memory") { _ = assistant.save() }
+          Button("Review opening folder") { assistant.propose(.openWorkspace, text: assistant.workspace.projects[index].id.uuidString) }
+          Button("Forget project") { assistant.workspace.projects.remove(at: index); assistant.projectID = nil; assistant.searchResults = []; _ = assistant.save() }
+        }
+        Toggle("Include this approved memory in my next request", isOn: $assistant.shareMemory)
+        HStack {
+          TextField("Find filenames in selected folder", text: $assistant.searchQuery).onSubmit(assistant.search)
+          Button("Search", action: assistant.search)
+        }
+        Text("Search visits at most 2,000 entries and returns 40 matches. Hidden files and dependency folders are excluded. Contents are read only when attached.").font(.caption)
+        ForEach(assistant.searchResults, id: \.path) { file in
+          Button(file.path) { assistant.attach(file) }.font(.caption).lineLimit(2)
+        }
+      }
+    }
+  }
+}

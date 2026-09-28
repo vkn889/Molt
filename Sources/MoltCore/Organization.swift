@@ -166,6 +166,16 @@ public final class OrganizationStore {
     guard sqlite3_open(url.path, &db) == SQLITE_OK else {
       throw MoltError.invalid("Cannot open organization database.")
     }
+    var versionStatement: OpaquePointer?
+    guard sqlite3_prepare_v2(db, "PRAGMA user_version", -1, &versionStatement, nil) == SQLITE_OK else {
+      throw MoltError.invalid("Cannot read organization database version.")
+    }
+    let versionResult = sqlite3_step(versionStatement)
+    let version = sqlite3_column_int(versionStatement, 0)
+    sqlite3_finalize(versionStatement)
+    guard versionResult == SQLITE_ROW, version <= 1 else {
+      throw MoltError.invalid("This organization database needs a newer version of Molt.")
+    }
     try execute(
       "PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; CREATE TABLE IF NOT EXISTS records(kind TEXT NOT NULL, id TEXT NOT NULL, payload BLOB NOT NULL, PRIMARY KEY(kind,id)); PRAGMA user_version=1;"
     )

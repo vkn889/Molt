@@ -13,6 +13,7 @@ public struct WorkTask: Codable, Identifiable {
   public var created = Date()
   public var due: Date?
   public var completed: Date?
+  public var recurrenceParentID: UUID?
   public var priority = 0, estimate = 25
   public var project = "Inbox", tags = "", recurrence = "none"
   public var today = false
@@ -138,11 +139,13 @@ public struct Organization: Codable {
     }
     tasks[index].completed = now
     tasks[index].history.append("Completed on \(now.formatted())")
-    if let due = tasks[index].due,
+    if !tasks.contains(where: { $0.recurrenceParentID == id }),
+      let due = tasks[index].due,
       let next = Recurrence.next(after: due, rule: tasks[index].recurrence)
     {
       var following = tasks[index]
       following.id = UUID()
+      following.recurrenceParentID = id
       following.created = now
       following.due = next
       following.completed = nil

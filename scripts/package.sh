@@ -36,6 +36,11 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <key>NSCalendarsFullAccessUsageDescription</key><string>Molt reads only selected calendars for your Today dashboard. It never creates or edits events.</string>
 </dict></plist>
 PLIST
+# Runtime is opt-in for development packaging; release workflow prepares it explicitly.
+if [[ -d dist/Runtime ]]; then
+  cp -R dist/Runtime "$APP/Contents/Resources/Runtime"
+  cp docs/licenses/Qwen2.5.txt "$APP/Contents/Resources/Runtime/LICENSE-Qwen2.5.txt"
+fi
 # Universal binaries need an ad-hoc code signature on Apple Silicon. This is not
 # Developer ID signing or notarization and carries no external author identity.
 codesign --force --deep --sign - "$APP"

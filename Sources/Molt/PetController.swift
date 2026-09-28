@@ -21,6 +21,7 @@ import SwiftUI
   @Published var tab = "Today"
   @Published var petVisible = true
   @Published var dashboardVisible = true
+  let assistant: AssistantController
   let clock = CompanionClock()
   let contexts = ContextAdapters()
   let organizationStore: OrganizationStore
@@ -50,6 +51,7 @@ import SwiftUI
       ?? FileManager.default.url(
         for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true
       ).appendingPathComponent("Molt")
+    assistant = AssistantController(directory: directory)
     store = PetStore(directory: directory)
     let bundled = try PetStore.definition(at: BundledDefinitions.url("molt"))
     organizationStore = try OrganizationStore(
@@ -121,6 +123,7 @@ import SwiftUI
   @objc private func woke() { tick() }
   func tick(event: String? = nil) {
     let now = self.now
+    assistant.checkRituals(at: now)
     state.companion?.clockCorrected = Date() < (state.companion?.lastReliableClock ?? .distantPast)
     state.companion?.lastReliableClock = now
     Simulation.advance(&state, definition: definition, to: now)

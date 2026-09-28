@@ -7,6 +7,7 @@ final class FloatingPanel: NSPanel { override var canBecomeKey: Bool { true } }
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDelegate {
   private var controller: PetController?
+  private var island: IslandCoordinator?
   private var petWindow: NSPanel?
   private var detailWindow: NSWindow?
   private var gameWindow: NSWindow?
@@ -61,9 +62,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
       NotificationCenter.default.addObserver(
         self, selector: #selector(recoverPosition),
         name: NSApplication.didChangeScreenParametersNotification, object: nil)
+      island = IslandCoordinator(controller: controller)
       rebuildMenu()
       applyPreferences()
-      showCompanion()
     } catch { showRecovery(error) }
   }
   private func showRecovery(_ error: Error) {
@@ -91,7 +92,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
       title: "\(controller.petName) · Day \(controller.age + 1)", action: nil, keyEquivalent: "")
     title.isEnabled = false
     menu.addItem(title)
-    add("Open dashboard…", #selector(showCompanion), to: menu, key: "o")
+    add("Open Molt Island…", #selector(showCompanion), to: menu, key: "o")
     add("Quick capture…", #selector(showCapture), to: menu, key: "k")
     menu.addItem(.separator())
     for action in controller.definition.interactions.prefix(3) {
@@ -134,36 +135,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     controller.interact(action)
   }
   @objc func showCompanion() {
-    guard let controller else { return }
-    if detailWindow == nil {
-      detailWindow = window(
-        title: "Molt: your desktop companion", size: NSSize(width: 1030, height: 780),
-        content: CompanionView(controller: controller))
-      detailWindow?.minSize = NSSize(width: 930, height: 720)
-    }
-    NSApp.activate(ignoringOtherApps: true)
-    detailWindow?.makeKeyAndOrderFront(nil)
-    controller.dashboardVisible = true
+    guard controller != nil else { return }
+    island?.open()
   }
   private func showGame() {
-    guard let controller else { return }
-    if gameWindow == nil {
-      gameWindow = window(
-        title: "Molt games", size: NSSize(width: 530, height: 540),
-        content: GameView(controller: controller))
-    }
-    NSApp.activate(ignoringOtherApps: true)
-    gameWindow?.makeKeyAndOrderFront(nil)
+    controller?.tab = "Play"
+    island?.open()
   }
   @objc func showCapture() {
-    guard let controller else { return }
-    if captureWindow == nil {
-      captureWindow = window(
-        title: "Quick capture", size: NSSize(width: 520, height: 310),
-        content: QuickCaptureView(controller: controller))
-    }
-    NSApp.activate(ignoringOtherApps: true)
-    captureWindow?.makeKeyAndOrderFront(nil)
+    controller?.tab = "Capture"
+    island?.open()
   }
   private func window<V: View>(title: String, size: NSSize, content: V) -> NSWindow {
     let w = NSWindow(
@@ -329,6 +310,32 @@ struct QuickCaptureView: View {
 @main struct MoltApplication {
   @MainActor static func main() {
     let app = NSApplication.shared
+    if let index = CommandLine.arguments.firstIndex(of: "--verify-local-ai"),
+      CommandLine.arguments.count > index + 1
+    {
+      let model = URL(fileURLWithPath: CommandLine.arguments[index + 1])
+      let manager = ModelManager(directory: FileManager.default.temporaryDirectory)
+      Task {
+        do {
+          let provider = ManagedLocalProvider(executable: manager.executable, modelURL: model)
+          var response = ""
+          for try await token in provider.stream(
+            model: ManagedModel.id,
+            messages: [.init(role: "user", content: "Say hello in one short sentence.")])
+          { response += token }
+          guard !response.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw InferenceError.malformed
+          }
+          print("Packaged local worker ready: \(response)")
+          exit(0)
+        } catch {
+          fputs("Local worker failed: \(error)\n", stderr)
+          exit(1)
+        }
+      }
+      app.run()
+      return
+    }
     if let index = CommandLine.arguments.firstIndex(of: "--render-preview"),
       CommandLine.arguments.count > index + 1
     {
@@ -355,12 +362,16 @@ struct QuickCaptureView: View {
     controller.organization.tasks[0].today = true
     controller.organization.tasks[1].today = true
     controller.tab = CommandLine.arguments.last == "--pet" ? "Molt" : "Today"
-    let view = NSHostingView(rootView: CompanionView(controller: controller))
+    let islandPreview = CommandLine.arguments.contains("--island")
+    if islandPreview { controller.tab = "Ask Molt" }
+    let view = NSHostingView(
+      rootView: CompanionView(controller: controller, compact: islandPreview))
     let window = NSWindow(
-      contentRect: NSRect(x: 0, y: 0, width: 1030, height: 780), styleMask: [.borderless],
+      contentRect: NSRect(x: 0, y: 0, width: islandPreview ? 760 : 1030, height: 780),
+      styleMask: [.borderless],
       backing: .buffered, defer: false)
     window.contentView = view
-    view.frame = NSRect(x: 0, y: 0, width: 1030, height: 780)
+    view.frame = NSRect(x: 0, y: 0, width: islandPreview ? 760 : 1030, height: 780)
     view.layoutSubtreeIfNeeded()
     guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
       throw MoltError.invalid("Could not allocate preview bitmap.")

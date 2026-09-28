@@ -25,3 +25,9 @@ Build the universal `.app` and DMG with `scripts/package.sh`. Check the app’s 
 ## Manual qualification
 
 Before describing a release as fully qualified, exercise real restart/sleep/wake, notifications enabled/denied/revoked, selected-calendar access, full-screen Spaces, physical display removal, click-through recovery, keyboard-only workflows, VoiceOver, enlarged pet sizes and reduced motion. Measure CPU and resident memory over an actual eight-hour session with visible and hidden windows. The automated simulated soak is not a substitute for these measurements.
+
+## Island and local AI checks
+
+`InferenceTests` and `FileMovesTests` cover geometry, local/cloud capability boundaries, streaming failures, corrupt weights, durable job reconciliation, file collisions, stale previews, failed receipt writes, symlinks, and guarded undo. Live providers are opt-in via the environment variables documented in `local-ai.md`; ordinary CI never requires a model download or running Ollama.
+
+The packaged app exposes `--verify-local-ai /path/to/model.gguf` for a readiness check using its own worker. A successful check under `sandbox-exec -p '(version 1)(allow default)(deny network*)'` confirms the tested text-generation path works with networking denied. This was exercised on the development Apple silicon Mac. It does not prove all hardware, installer, or permission flows.

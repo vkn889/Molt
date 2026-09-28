@@ -3,47 +3,66 @@ import SwiftUI
 
 struct CompanionView: View {
   @ObservedObject var controller: PetController
+  var compact = false
   @State private var capture = ""
   @State private var captureKind = "task"
   var body: some View {
     HStack(spacing: 0) {
-      VStack(alignment: .leading, spacing: 8) {
-        HStack {
-          Image(systemName: "leaf.fill")
-          Text("molt").font(MoltTheme.display(30))
-        }.padding(.bottom, 28)
-        ForEach(
-          [
-            ("Today", "sun.max"), ("Activity", "waveform.path.ecg"), ("Molt", "heart"),
-            ("Home", "house"), ("Library", "books.vertical"), ("Settings", "slider.horizontal.3"),
-          ], id: \.0
-        ) { name, icon in
-          Button {
-            controller.tab = name
-          } label: {
-            Label(name, systemImage: icon).font(.system(size: 14, weight: .medium)).frame(
-              maxWidth: .infinity, alignment: .leading
-            ).padding(12).background(
-              controller.tab == name ? MoltTheme.green.opacity(0.13) : .clear,
-              in: RoundedRectangle(cornerRadius: 10))
-          }.buttonStyle(.plain)
-        }
-        Spacer()
-        CreatureView(
-          appearance: controller.companion.appearance, atlasURL: controller.atlasURL,
-          mood: controller.mood,
-          moving: controller.dashboardVisible && !controller.companion.preferences.reducedMotion
-            && controller.mood != "sweating",
-          intensity: controller.companion.preferences.animationIntensity,
-          stage: controller.state.stageID
-        ).frame(height: 130)
-        Text(controller.petName).font(MoltTheme.display(20))
-        Text("Day \(controller.age + 1) together").font(.caption).foregroundStyle(.secondary)
-        Label("Local by nature", systemImage: "lock.shield").font(.caption2).foregroundStyle(
-          .secondary
-        ).padding(.top, 20)
-      }.padding(22).frame(width: 205).background(Color(red: 0.88, green: 0.92, blue: 0.85))
+      if !compact {
+        VStack(alignment: .leading, spacing: 8) {
+          HStack {
+            Image(systemName: "leaf.fill")
+            Text("molt").font(MoltTheme.display(30))
+          }.padding(.bottom, 28)
+          ForEach(
+            [
+              ("Today", "sun.max"), ("Ask Molt", "bubble.left"), ("Activity", "waveform.path.ecg"),
+              ("Molt", "heart"),
+              ("Home", "house"), ("Library", "books.vertical"), ("Settings", "slider.horizontal.3"),
+            ], id: \.0
+          ) { name, icon in
+            Button {
+              controller.tab = name
+            } label: {
+              Label(name, systemImage: icon).font(.system(size: 14, weight: .medium)).frame(
+                maxWidth: .infinity, alignment: .leading
+              ).padding(12).background(
+                controller.tab == name ? MoltTheme.green.opacity(0.13) : .clear,
+                in: RoundedRectangle(cornerRadius: 10))
+            }.buttonStyle(.plain)
+          }
+          Spacer()
+          CreatureView(
+            appearance: controller.companion.appearance, atlasURL: controller.atlasURL,
+            mood: controller.mood,
+            moving: controller.dashboardVisible && !controller.companion.preferences.reducedMotion
+              && controller.mood != "sweating",
+            intensity: controller.companion.preferences.animationIntensity,
+            stage: controller.state.stageID
+          ).frame(height: 130)
+          Text(controller.petName).font(MoltTheme.display(20))
+          Text("Day \(controller.age + 1) together").font(.caption).foregroundStyle(.secondary)
+          Label("Local by nature", systemImage: "lock.shield").font(.caption2).foregroundStyle(
+            .secondary
+          ).padding(.top, 20)
+        }.padding(22).frame(width: 205).background(Color(red: 0.88, green: 0.92, blue: 0.85))
+      }
       VStack(spacing: 0) {
+        if compact {
+          ScrollView(.horizontal, showsIndicators: false) {
+            HStack {
+              ForEach(
+                [
+                  "Today", "Ask Molt", "Activity", "Molt", "Home", "Library", "Play", "Capture",
+                  "Settings",
+                ], id: \.self
+              ) { name in
+                Button(name) { controller.tab = name }.buttonStyle(.bordered).tint(
+                  controller.tab == name ? .green : .gray)
+              }
+            }.padding(10)
+          }
+        }
         HStack {
           VStack(alignment: .leading, spacing: 4) {
             Text(
@@ -81,6 +100,9 @@ struct CompanionView: View {
                 .font(.caption).foregroundStyle(.secondary)
             }
             switch controller.tab {
+            case "Ask Molt": AssistantView(assistant: controller.assistant, controller: controller)
+            case "Play": GameView(controller: controller)
+            case "Capture": QuickCaptureView(controller: controller)
             case "Today": TodayView(controller: controller)
             case "Activity":
               ActivityDashboard(controller: controller, contexts: controller.contexts)
@@ -92,9 +114,10 @@ struct CompanionView: View {
           }.padding(26)
         }
       }
-    }.frame(minWidth: 930, minHeight: 720).background(MoltTheme.paper).foregroundStyle(
-      MoltTheme.ink
-    ).preferredColorScheme(.light)
+    }.frame(minWidth: compact ? 0 : 930, minHeight: compact ? 0 : 720).background(MoltTheme.paper)
+      .foregroundStyle(
+        MoltTheme.ink
+      ).preferredColorScheme(.light)
   }
 }
 struct AdoptionView: View {

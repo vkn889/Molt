@@ -1,0 +1,15 @@
+name: Build and test
+on:
+  push:
+    branches: ['**']
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 scripts/check-copy.py
+      - run: swift test
+      - run: swift build -c release

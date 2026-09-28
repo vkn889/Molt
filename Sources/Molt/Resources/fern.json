@@ -1,0 +1,211 @@
+{
+  "id": "fern",
+  "name": "Fern",
+  "statDefinitions": [
+    {
+      "id": "hunger",
+      "name": "Nourishment",
+      "initialValue": 85,
+      "decayPerHour": 1.5
+    },
+    {
+      "id": "energy",
+      "name": "Energy",
+      "initialValue": 90,
+      "decayPerHour": 1.0
+    },
+    {
+      "id": "affection",
+      "name": "Affection",
+      "initialValue": 75,
+      "decayPerHour": 0.75
+    }
+  ],
+  "evolutionTree": [
+    {
+      "id": "seed",
+      "displayName": "Little beginning",
+      "sprite": "\ud83c\udf31",
+      "minAgeDays": 0,
+      "nextStages": [
+        "sprout"
+      ]
+    },
+    {
+      "id": "sprout",
+      "displayName": "Curious sprout",
+      "sprite": "\ud83c\udf3f",
+      "minAgeDays": 2,
+      "requiredPreviousStage": "seed",
+      "nextStages": [
+        "radiant",
+        "wild"
+      ]
+    },
+    {
+      "id": "radiant",
+      "displayName": "Radiant companion",
+      "sprite": "\ud83c\udf33",
+      "minAgeDays": 7,
+      "requiredPreviousStage": "sprout",
+      "minCareScore": 65,
+      "nextStages": []
+    },
+    {
+      "id": "wild",
+      "displayName": "Wild little soul",
+      "sprite": "\ud83c\udf35",
+      "minAgeDays": 7,
+      "requiredPreviousStage": "sprout",
+      "nextStages": []
+    }
+  ],
+  "personality": {
+    "reactionSpeed": 1,
+    "dialogue": {
+      "idle": [
+        "A little company, while you do your thing."
+      ],
+      "feed": [
+        "A little water, a little light. We can grow slowly."
+      ],
+      "play": [
+        "That was the best part of my day."
+      ],
+      "rest": [
+        "A soft pause. We both deserve one."
+      ],
+      "systemStressed": [
+        "Your disk is getting full. A little space would feel nice."
+      ],
+      "hot": [
+        "Getting warm in here. Let\u2019s take it easy."
+      ]
+    }
+  },
+  "interactions": [
+    {
+      "id": "feed",
+      "name": "Water",
+      "symbol": "carrot.fill",
+      "effects": {
+        "hunger": 12,
+        "affection": 6
+      },
+      "cooldownGroup": "meal",
+      "cooldownSeconds": 1200
+    },
+    {
+      "id": "play",
+      "name": "Play",
+      "symbol": "sparkles",
+      "effects": {
+        "affection": 18,
+        "energy": -5
+      },
+      "cooldownGroup": "toy",
+      "cooldownSeconds": 600
+    },
+    {
+      "id": "rest",
+      "name": "Rest",
+      "symbol": "moon.fill",
+      "effects": {
+        "energy": 20
+      },
+      "cooldownGroup": "rest",
+      "cooldownSeconds": 0
+    },
+    {
+      "id": "snack",
+      "name": "Snack",
+      "symbol": "carrot",
+      "effects": {
+        "hunger": 8
+      },
+      "cooldownGroup": "snack",
+      "cooldownSeconds": 600
+    },
+    {
+      "id": "pet",
+      "name": "Reassure",
+      "symbol": "heart",
+      "effects": {
+        "affection": 4
+      },
+      "cooldownGroup": "pet",
+      "cooldownSeconds": 15
+    },
+    {
+      "id": "groom",
+      "name": "Groom",
+      "symbol": "comb",
+      "effects": {
+        "affection": 8
+      },
+      "cooldownGroup": "groom",
+      "cooldownSeconds": 600
+    },
+    {
+      "id": "water",
+      "name": "Water",
+      "symbol": "drop",
+      "effects": {
+        "energy": 3,
+        "affection": 3
+      },
+      "cooldownGroup": "water",
+      "cooldownSeconds": 300
+    },
+    {
+      "id": "story",
+      "name": "Tell a story",
+      "symbol": "book",
+      "effects": {
+        "affection": 6
+      },
+      "cooldownGroup": "story",
+      "cooldownSeconds": 600
+    },
+    {
+      "id": "basic-care",
+      "name": "Basic recovery",
+      "symbol": "cross.case",
+      "effects": {
+        "hunger": 25
+      },
+      "cooldownGroup": "basic-care",
+      "cooldownSeconds": 0
+    }
+  ],
+  "systemHealthMappings": [
+    {
+      "signal": "batteryLevel",
+      "belowThreshold": 0.2,
+      "affectsStat": "energy",
+      "delta": -8,
+      "cooldownMinutes": 120
+    },
+    {
+      "signal": "isCharging",
+      "aboveThreshold": 0.5,
+      "affectsStat": "energy",
+      "delta": 5,
+      "cooldownMinutes": 60
+    },
+    {
+      "signal": "thermalState",
+      "atLeast": "serious",
+      "triggersEvent": "hot",
+      "cooldownMinutes": 120
+    },
+    {
+      "signal": "diskFreeRatio",
+      "belowThreshold": 0.05,
+      "triggersEvent": "systemStressed",
+      "cooldownMinutes": 360
+    }
+  ],
+  "schemaVersion": 2,
+  "minimumAppVersion": "0.2.0"
+}

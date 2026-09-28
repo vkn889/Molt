@@ -113,7 +113,7 @@ import SwiftUI
     }
     tick()
     timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
-      Task { @MainActor in self?.tick() }
+      Task { @MainActor [weak self] in self?.tick() }
     }
     NSWorkspace.shared.notificationCenter.addObserver(
       self, selector: #selector(woke), name: NSWorkspace.didWakeNotification, object: nil)

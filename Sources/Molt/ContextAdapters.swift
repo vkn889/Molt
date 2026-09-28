@@ -89,7 +89,7 @@ import UserNotifications
   }
   func enableCalendar(completion: @escaping (Bool) -> Void) {
     let done: @Sendable (Bool, Error?) -> Void = { [weak self] granted, error in
-      Task { @MainActor in
+      Task { @MainActor [weak self] in
         self?.calendarError =
           error?.localizedDescription
           ?? (granted ? nil : "Calendar access was not granted. All other tools still work.")

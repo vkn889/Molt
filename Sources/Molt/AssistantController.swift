@@ -9,7 +9,7 @@ import SwiftUI
   }
   @Published var draft = ""
   @Published var reply = ""
-  @Published var status = "AI is optional. Connect to local Ollama when you are ready."
+  @Published var status = "AI is optional. Choose a local provider and connect when you are ready."
   @Published var running = false
   @Published var attachment = ""
   @Published var attachmentName = ""

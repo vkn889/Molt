@@ -48,4 +48,27 @@ final class OrganizationReliabilityTests: XCTestCase {
     XCTAssertEqual(sqlite3_step(statement), SQLITE_ROW)
     XCTAssertEqual(sqlite3_column_int(statement, 0), 99)
   }
+  func testFailedSaveRollsBackAndAllowsRetry() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = try OrganizationStore(url: directory.appendingPathComponent("organization.sqlite"))
+    var original = Organization()
+    original.tasks = [WorkTask("Keep this task")]
+    original.notes = [Note("Keep this note", body: "Original body")]
+    try store.save(original)
+    var invalid = original
+    invalid.tasks.removeAll()
+    invalid.notes[0].body = "Should not persist"
+    var session = FocusSession(now: Date(), minutes: 25)
+    session.elapsed = .nan
+    invalid.sessions = [session]
+    XCTAssertThrowsError(try store.save(invalid))
+    let restored = try store.load()
+    XCTAssertEqual(restored.tasks.first?.id, original.tasks[0].id)
+    XCTAssertEqual(restored.notes.first?.body, "Original body")
+    XCTAssertTrue(restored.sessions.isEmpty)
+    original.notes[0].body = "Valid retry"
+    try store.save(original)
+    XCTAssertEqual(try store.load().notes.first?.body, "Valid retry")
+  }
 }

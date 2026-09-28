@@ -3,10 +3,12 @@ import SwiftUI
 
 struct CompanionView: View {
   @ObservedObject var controller: PetController
+  var compact = false
   @State private var capture = ""
   @State private var captureKind = "task"
   var body: some View {
     HStack(spacing: 0) {
+      if !compact {
       VStack(alignment: .leading, spacing: 8) {
         HStack {
           Image(systemName: "leaf.fill")
@@ -14,7 +16,7 @@ struct CompanionView: View {
         }.padding(.bottom, 28)
         ForEach(
           [
-            ("Today", "sun.max"), ("Activity", "waveform.path.ecg"), ("Molt", "heart"),
+            ("Today", "sun.max"), ("Ask Molt", "bubble.left"), ("Activity", "waveform.path.ecg"), ("Molt", "heart"),
             ("Home", "house"), ("Library", "books.vertical"), ("Settings", "slider.horizontal.3"),
           ], id: \.0
         ) { name, icon in
@@ -43,7 +45,17 @@ struct CompanionView: View {
           .secondary
         ).padding(.top, 20)
       }.padding(22).frame(width: 205).background(Color(red: 0.88, green: 0.92, blue: 0.85))
+      }
       VStack(spacing: 0) {
+        if compact {
+          ScrollView(.horizontal, showsIndicators: false) {
+            HStack {
+              ForEach(["Today", "Ask Molt", "Activity", "Molt", "Home", "Library", "Play", "Capture", "Settings"], id: \.self) { name in
+                Button(name) { controller.tab = name }.buttonStyle(.bordered).tint(controller.tab == name ? .green : .gray)
+              }
+            }.padding(10)
+          }
+        }
         HStack {
           VStack(alignment: .leading, spacing: 4) {
             Text(
@@ -81,6 +93,9 @@ struct CompanionView: View {
                 .font(.caption).foregroundStyle(.secondary)
             }
             switch controller.tab {
+            case "Ask Molt": AssistantView(assistant: controller.assistant, controller: controller)
+            case "Play": GameView(controller: controller)
+            case "Capture": QuickCaptureView(controller: controller)
             case "Today": TodayView(controller: controller)
             case "Activity":
               ActivityDashboard(controller: controller, contexts: controller.contexts)
@@ -92,7 +107,7 @@ struct CompanionView: View {
           }.padding(26)
         }
       }
-    }.frame(minWidth: 930, minHeight: 720).background(MoltTheme.paper).foregroundStyle(
+    }.frame(minWidth: compact ? 0 : 930, minHeight: compact ? 0 : 720).background(MoltTheme.paper).foregroundStyle(
       MoltTheme.ink
     ).preferredColorScheme(.light)
   }

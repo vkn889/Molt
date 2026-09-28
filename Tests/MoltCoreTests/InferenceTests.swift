@@ -1,6 +1,18 @@
 import XCTest
+import CoreGraphics
 @testable import MoltCore
 final class InferenceTests: XCTestCase {
+  func testIslandStaysBelowNotchOnOffsetDisplay() {
+    let screen = CGRect(x: -1512, y: 200, width: 1512, height: 982)
+    let visible = CGRect(x: -1512, y: 225, width: 1512, height: 925)
+    for expanded in [true, false] {
+      let frame = IslandGeometry.frame(screen: screen, visible: visible, safeTop: 32, expanded: expanded)
+      XCTAssertTrue(visible.contains(frame))
+      XCTAssertLessThanOrEqual(frame.maxY, screen.maxY - 32)
+    }
+    let small = CGRect(x: 100, y: 100, width: 600, height: 500)
+    XCTAssertTrue(small.contains(IslandGeometry.frame(screen: small, visible: small, safeTop: 0, expanded: true)))
+  }
   func testRejectsRemoteAndEmbeddingModels() throws {
     XCTAssertThrowsError(try OllamaProvider.validateMetadata(Data("{\"remote_host\":\"https://example.org\",\"capabilities\":[\"completion\"]}".utf8), name: "innocent-name"))
     XCTAssertThrowsError(try OllamaProvider.validateMetadata(Data("{\"capabilities\":[\"embedding\"]}".utf8), name: "embed"))

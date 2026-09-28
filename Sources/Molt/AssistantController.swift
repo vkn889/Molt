@@ -191,13 +191,16 @@ import SwiftUI
   }
   func unload() {
     guard !running, !selectedModel.isEmpty else { return }
+    let id = UUID()
+    requestID = id
     running = true
     generation = Task {
-      defer { running = false }
+      defer { if requestID == id { running = false } }
       do {
         try await provider.unload(model: selectedModel)
+        guard requestID == id else { return }
         status = "Model unloaded. It will load on the next request."
-      } catch { status = error.localizedDescription }
+      } catch { if requestID == id { status = error.localizedDescription } }
     }
   }
   func attach(_ url: URL) {
@@ -221,7 +224,8 @@ import SwiftUI
     panel.canChooseDirectories = true
     panel.canChooseFiles = false
     if panel.runModal() == .OK, let url = panel.url {
-      let project = ProjectMemory(name: url.lastPathComponent, folder: url.path)
+      let project = ProjectMemory(
+        name: url.lastPathComponent, folder: url.resolvingSymlinksInPath().path)
       workspace.projects.append(project)
       projectID = project.id
       _ = save()
@@ -303,7 +307,17 @@ import SwiftUI
         _ = save()
         return
       }
-      let opened = NSWorkspace.shared.open(URL(fileURLWithPath: project.folder))
+      let folder = URL(fileURLWithPath: project.folder)
+      guard folder.resolvingSymlinksInPath().path == project.folder,
+        (try? folder.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+      else {
+        workspace.jobs[index].status = "failed"
+        workspace.jobs[index].detail =
+          "The approved folder moved or became a symbolic link. Select it again."
+        _ = save()
+        return
+      }
+      let opened = NSWorkspace.shared.open(folder)
       if !opened {
         workspace.jobs[index].status = "failed"
         workspace.jobs[index].detail = "macOS could not open this folder."
@@ -311,7 +325,9 @@ import SwiftUI
         return
       }
     }
-    workspace.jobs[index].status = controller.organizationError == nil ? "completed" : "failed"
+    workspace.jobs[index].status =
+      proposal.tool == .openWorkspace || controller.organizationError == nil
+      ? "completed" : "failed"
     workspace.jobs[index].detail =
       controller.organizationError ?? "Executed by Molt after your review."
     if workspace.jobs[index].status == "completed" {

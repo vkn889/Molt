@@ -124,7 +124,7 @@ public final class ManagedLocalProvider: InferenceProvider, @unchecked Sendable 
             throw MoltError.invalid(
               "Local worker stopped or failed. Your companion and saves are unaffected.")
           }
-          if !pending.isEmpty { throw InferenceError.malformed }
+          if !pending.isEmpty || count == 0 { throw InferenceError.malformed }
           continuation.finish()
         } catch {
           control.stop()

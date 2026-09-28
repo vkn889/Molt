@@ -69,6 +69,24 @@ final class InferenceTests: XCTestCase {
     { result += token }
     XCTAssertFalse(result.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
   }
+  func testManagedCancellationWhenExplicitlyEnabled() async throws {
+    guard let runtime = ProcessInfo.processInfo.environment["MOLT_TEST_RUNTIME"],
+      let model = ProcessInfo.processInfo.environment["MOLT_TEST_MODEL"]
+    else { throw XCTSkip("Opt-in managed cancellation") }
+    let provider = ManagedLocalProvider(
+      executable: URL(fileURLWithPath: runtime), modelURL: URL(fileURLWithPath: model))
+    let task = Task {
+      for try await _ in provider.stream(
+        model: ManagedModel.id,
+        messages: [.init(role: "user", content: "Write a very long story about a garden.")])
+      {}
+    }
+    try await Task.sleep(nanoseconds: 300_000_000)
+    let start = Date()
+    task.cancel()
+    _ = await task.result
+    XCTAssertLessThan(Date().timeIntervalSince(start), 5)
+  }
   func testRejectsCorruptManagedWeights() throws {
     let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: file) }

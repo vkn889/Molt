@@ -75,7 +75,7 @@ public struct FileMovePlan: Codable, Identifiable {
         moves[index].state = "completed"
         try persist(self)
       } catch {
-        moves[index].state = "failed"
+        if moves[index].state != "completed" { moves[index].state = "failed" }
         detail = error.localizedDescription
         try? persist(self)
         throw error

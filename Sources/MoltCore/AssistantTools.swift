@@ -89,7 +89,7 @@ public enum ApprovedFiles {
     return text
   }
   public static func search(_ query: String, folder: URL) -> [URL] {
-    guard !query.isEmpty,
+    guard folder.resolvingSymlinksInPath().path == folder.standardizedFileURL.path, !query.isEmpty,
       let files = FileManager.default.enumerator(
         at: folder, includingPropertiesForKeys: [.isRegularFileKey],
         options: [.skipsHiddenFiles, .skipsPackageDescendants])

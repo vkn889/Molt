@@ -49,6 +49,21 @@ final class FileMovesTests: XCTestCase {
     XCTAssertThrowsError(try plan.execute { _ in throw MoltError.invalid("Disk full") })
     XCTAssertTrue(FileManager.default.fileExists(atPath: source.path))
   }
+  func testReceiptFailureRetainsActualCompletedState() throws {
+    let (root, source, folder) = try fixture()
+    defer { try? FileManager.default.removeItem(at: root) }
+    var plan = try FileMovePlan.preview(files: [source], folder: folder)
+    XCTAssertThrowsError(
+      try plan.execute { receipt in
+        if receipt.moves[0].state == "completed" { throw MoltError.invalid("Disk full after move") }
+      })
+    XCTAssertEqual(plan.moves[0].state, "completed")
+    XCTAssertTrue(
+      FileManager.default.fileExists(
+        atPath: folder.appendingPathComponent(source.lastPathComponent).path))
+    try plan.undo { _ in }
+    XCTAssertTrue(FileManager.default.fileExists(atPath: source.path))
+  }
   func testSymlinkEscapeRejected() throws {
     let (root, source, folder) = try fixture()
     defer { try? FileManager.default.removeItem(at: root) }

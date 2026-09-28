@@ -37,7 +37,7 @@ struct GameView: View {
             game.practice
               ? "Practice is always here for you."
               : "Completion recorded. Reopening cannot claim it again.")
-          Button("Close game") { NSApp.keyWindow?.close() }
+          Button("Close game") { controller.tab = "Molt" }
         } else if game.kind == "memory" {
           LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 4), spacing: 10) {
             ForEach(game.memory.cards.indices, id: \.self) { index in
@@ -85,11 +85,11 @@ struct GameView: View {
         HStack {
           Button(paused ? "Resume" : "Pause") { paused.toggle() }
           Spacer()
-          Button("Save and exit") { NSApp.keyWindow?.close() }
+          Button("Save and exit") { controller.tab = "Molt" }
           Button("End round") {
             controller.stopActivity()
             controller.game = nil
-            NSApp.keyWindow?.close()
+            controller.tab = "Molt"
           }
         }
       } else {

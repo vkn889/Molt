@@ -36,6 +36,20 @@ final class InferenceTests: XCTestCase {
     job.status = "running"; workspace.jobs = [job]; workspace.reconcile()
     XCTAssertEqual(workspace.jobs[0].status, "failed")
   }
+  func testManagedWorkerWhenExplicitlyEnabled() async throws {
+    guard let runtime = ProcessInfo.processInfo.environment["MOLT_TEST_RUNTIME"],
+      let model = ProcessInfo.processInfo.environment["MOLT_TEST_MODEL"] else { throw XCTSkip("Opt-in managed worker integration") }
+    let provider = ManagedLocalProvider(executable: URL(fileURLWithPath: runtime), modelURL: URL(fileURLWithPath: model))
+    var result = ""
+    for try await token in provider.stream(model: ManagedModel.id, messages: [.init(role: "user", content: "Say hello in one short sentence.")]) { result += token }
+    XCTAssertFalse(result.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+  }
+  func testRejectsCorruptManagedWeights() throws {
+    let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: file) }
+    try Data("invalid".utf8).write(to: file)
+    XCTAssertThrowsError(try ManagedModel.verify(file))
+  }
   func testOllamaIntegrationWhenExplicitlyEnabled() async throws {
     guard ProcessInfo.processInfo.environment["MOLT_TEST_OLLAMA"] == "1" else { throw XCTSkip("Opt-in local Ollama integration") }
     let provider = OllamaProvider()

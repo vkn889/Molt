@@ -135,7 +135,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     controller.interact(action)
   }
   @objc func showCompanion() {
-    guard let controller else { return }
+    guard controller != nil else { return }
     island?.open()
   }
   private func showGame() {
@@ -310,6 +310,32 @@ struct QuickCaptureView: View {
 @main struct MoltApplication {
   @MainActor static func main() {
     let app = NSApplication.shared
+    if let index = CommandLine.arguments.firstIndex(of: "--verify-local-ai"),
+      CommandLine.arguments.count > index + 1
+    {
+      let model = URL(fileURLWithPath: CommandLine.arguments[index + 1])
+      let manager = ModelManager(directory: FileManager.default.temporaryDirectory)
+      Task {
+        do {
+          let provider = ManagedLocalProvider(executable: manager.executable, modelURL: model)
+          var response = ""
+          for try await token in provider.stream(
+            model: ManagedModel.id,
+            messages: [.init(role: "user", content: "Say hello in one short sentence.")])
+          { response += token }
+          guard !response.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw InferenceError.malformed
+          }
+          print("Packaged local worker ready: \(response)")
+          exit(0)
+        } catch {
+          fputs("Local worker failed: \(error)\n", stderr)
+          exit(1)
+        }
+      }
+      app.run()
+      return
+    }
     if let index = CommandLine.arguments.firstIndex(of: "--render-preview"),
       CommandLine.arguments.count > index + 1
     {
@@ -338,9 +364,11 @@ struct QuickCaptureView: View {
     controller.tab = CommandLine.arguments.last == "--pet" ? "Molt" : "Today"
     let islandPreview = CommandLine.arguments.contains("--island")
     if islandPreview { controller.tab = "Ask Molt" }
-    let view = NSHostingView(rootView: CompanionView(controller: controller, compact: islandPreview))
+    let view = NSHostingView(
+      rootView: CompanionView(controller: controller, compact: islandPreview))
     let window = NSWindow(
-      contentRect: NSRect(x: 0, y: 0, width: islandPreview ? 760 : 1030, height: 780), styleMask: [.borderless],
+      contentRect: NSRect(x: 0, y: 0, width: islandPreview ? 760 : 1030, height: 780),
+      styleMask: [.borderless],
       backing: .buffered, defer: false)
     window.contentView = view
     view.frame = NSRect(x: 0, y: 0, width: islandPreview ? 760 : 1030, height: 780)

@@ -243,9 +243,9 @@ Games open in their own window and never capture system-wide keyboard input. Pau
 
 **Acceptance:** Each launch game supports keyboard operation, paused/resumed sessions where practical, clear exits, and completion without audio. Reward calculation is independently testable.
 
-## 8. Companion dashboard and command palette
+## 8. Notch-attached companion dashboard and command palette
 
-The floating creature is the emotional surface. A separate native dashboard holds useful information without covering the desktop constantly.
+The primary app interface is a notch-attached, expandable island. Command–Shift–Space toggles it, subject to shortcut availability. The small companion popup remains a lightweight surface; the full dashboard, chat, and tools live in the expanded island. See sections 21–25 for the revised design and delivery order.
 
 ### Dashboard tabs
 
@@ -348,7 +348,7 @@ System pressure affects creature expression more strongly than permanent develop
 - Keep raw system readings transient unless the user explicitly enables a diagnostic history.
 - No external messages, file rearrangement, purchases, or destructive actions without an explicit user action and a reviewable preview where relevant.
 
-Future optional AI needs separate consent for each category of context sent to a provider, a user-provided credential stored securely, a clear cost model, and an offline fallback. Do not include it in early milestones.
+The default AI path is local and requires no provider credential. Model installation is explicit. Any future cloud provider is a separate opt-in with consent for transmitted context, secure credential storage where required, and a clear cost model. Never silently fall back from local inference to a cloud service.
 
 ## 12. Desktop behavior and quality of life
 
@@ -494,9 +494,9 @@ Each phase ends with a usable release. These are scope gates, not calendar promi
 
 **Exit:** A creator can produce and import a working species without editing Swift, and incompatible packs fail without affecting the active pet.
 
-### Later, only after the above is stable
+### Later extensions
 
-Optional AI dialogue, richer explicit integrations, cross-device sync, signed/notarized distribution improvements, and an online creator directory. Each needs a separate product and technical design. Sync must not be added casually to a single-device timer/reward model.
+Cross-device sync, broader integrations, signed/notarized distribution improvements, and an online creator directory need separate designs. Local AI and bounded agent actions are now explicit roadmap scope, introduced according to section 25. Sync must not be added casually to a single-device timer/reward model.
 
 ## 16. First implementation backlog
 
@@ -568,6 +568,258 @@ Use opt-in interviews and voluntary issue reports; do not add telemetry by defau
 
 ## 20. Recommended next release boundary
 
-The next release should deliver **a named, customizable creature with expressive animation, durable cooldowns, basic training, one mini-game, and a small memory journal**. Finish that coherent experience before implementing the entire organization suite.
+The revised next release should first establish the **notch-attached app shell, named customizable creature, and shortcut interaction**. Follow with durable cooldowns, training, one mini-game, and memories. Introduce local AI and bounded computer tools through the revised delivery sequence in section 25.
 
-The eventual destination is one connected loop: plan something with Molt, work alongside it, take a playful break, teach it something, and watch your shared history shape its life. Every phase should strengthen that loop while keeping the computer:and the user's attention:under the user's control.
+The eventual destination is one connected loop: plan something with Molt, work alongside it, take a playful break, teach it something, and watch your shared history shape its life. Every phase should strengthen that loop while keeping the computer and the user's attention under the user's control.
+
+
+## 21. Revised product direction: Molt Island
+
+**This section supersedes earlier assumptions about a standalone dashboard window.** The entire primary app experience becomes a Mac notch-attached island, inspired by the expanding interaction model of a Dynamic Island. Preserve Molt's original visual identity rather than copying Apple's branding or assets.
+
+The creature lives at the island's edge and appears to emerge from it. The physical camera notch has no usable display pixels; Molt renders beside and below the hardware cutout, never inside it. On a display without a notch, use a top-center island with identical capabilities.
+
+### Surface states
+
+| State | Purpose and contents | Behavior |
+|---|---|---|
+| Resting | Tiny creature pose and optional single status cue | No keyboard focus, minimal movement, no large permanent panel |
+| Glance | Timer, next reminder, or current agent task | Brief, non-interactive cue unless explicitly opened; obey quiet mode |
+| Expanded | Full app with navigation, chat, tasks, games, creature, and settings | Opened deliberately; accepts keyboard input |
+| Working | Compact progress and cancel control | Long work continues after collapse, when safe |
+| Needs review | A factual indicator that a concrete action awaits review | Never steals focus or executes just because time passes |
+
+Keep the small companion popup distinct from the expanded application. This redesign does not require removing its existing lightweight interactions. It should open the island for complex work instead of spawning a competing dashboard.
+
+### Primary interaction
+
+- Requested default shortcut: **Command–Shift–Space**. Toggle the expanded island and focus its command/chat input.
+- Register a scoped global shortcut rather than recording all keystrokes. Check registration results, expose remapping, and provide menu bar and clickable-island alternatives.
+- Apple documents system uses for shortcuts that vary by OS and configuration. Do not silently override a system binding. Explain conflicts and let the user choose another shortcut.
+- Escape first dismisses a transient picker, then collapses the island. Never discards unsaved edits or silently cancels an active action.
+- Clicking outside collapses ordinary browsing views. Preserve drafts; a required review can remain pending without executing.
+- Opening by keyboard intentionally takes focus. Passive cues never do. Restore the previous app's focus when appropriate on collapse.
+- Dragging a file onto the island opens a drop preview with available actions; dropping alone never authorizes moving, deleting, or uploading it.
+- Hover expansion is optional and defaults off to reduce accidental activation near menu bar controls.
+
+### Expanded layout
+
+A black or near-black rounded surface grows downward from the notch, with subtle creature-colored accents, Oxanium headings, and readable native body text. Use clear boundaries in light and dark wallpapers. Do not rely on translucency for legibility.
+
+1. Header: creature, chosen name, active workspace, and current activity indicator.
+2. Command/chat field: explicit text input, attachments, and a visible local-AI status.
+3. Navigation: Today, Ask Molt, Activity, Play & Train, My Molt, and Library. Home and wardrobe live under My Molt; settings remain accessible from the header.
+4. Main pane: one focused feature at a time, with scrolling and optional detail navigation.
+5. Action strip: progress, cancel, undo when available, or an action-review button.
+
+Start with an expanded width around 640–760 points, clamped to the screen and text size. Height is content-dependent and capped to available display space. These are prototype dimensions, not fixed requirements. On small screens, switch to a single-column layout. Long documents and games use a larger expanded panel mode attached to the same anchor, not a tiny tooltip.
+
+### Geometry and platform behavior
+
+- Derive layout from the selected `NSScreen` frame, `safeAreaInsets`, and auxiliary top-area rectangles; never hardcode a notch size or assume screen coordinates begin at zero.
+- Use an AppKit panel/window coordinator with SwiftUI content. Separate focusable expanded state from non-focus-stealing resting state.
+- Avoid covering menu bar controls and respect the hardware exclusion region. Recompute after display changes, scaling changes, and wake.
+- Default to the built-in notched display when available. Allow a selected display or active-display preference, with exactly one interactive island at a time.
+- Test full-screen apps, menu bar auto-hide, Spaces, Mission Control, and presentation mode. Do not promise visibility above system-secure surfaces.
+- On external monitors or notchless Macs, retain the top-center anchor and menu bar fallback.
+- Reduce or disable expansion motion when requested. Support VoiceOver, complete keyboard navigation, and large text without clipping.
+
+**Acceptance:** All primary app features are reachable from the island. The requested shortcut works when available, conflicts are explained, no controls lie beneath the physical notch, and passive updates do not interrupt typing in another application.
+
+## 22. Computer companion and agent capabilities
+
+All capabilities below are planned, not already operational. Prefer explicit APIs and integrations; use permissioned accessibility automation only when necessary and reliable. An app name alone is not evidence of a document's contents or the user's intent.
+
+| Capability | User experience | Action and permission boundary |
+|---|---|---|
+| Workspace rituals | “Let's code” opens a saved project, editor, links, and focus timer | Preview routine setup; execute only saved steps within the approved scope |
+| Resume checkpoints | Save selected file links, app links, task, and a short next-step note | User-chosen context; do not promise restoration of unsaved third-party state |
+| Drag-and-drop assistance | Drop a document or log for a summary, explanation, or task extraction | File access limited to supplied items; ask before persisting extracted information |
+| Downloads organizer | Propose folders, names, and selected file moves | Concrete before/after preview, collision checks, no deletion by default, undo records |
+| Universal action palette | Open projects, capture tasks, search notes, and run routines | Distinguish deterministic commands from model interpretation; confirm ambiguity |
+| Selected-text actions | Explain, rewrite, translate, save, or create a task | Explicit user handoff; no continuous text capture or automatic replacement |
+| Screen help on demand | Explain a shared error dialog or selected screen image | Separate screen permission; one-shot capture; vision-capable model required for visual understanding |
+| Project memory | Recall approved goals, folders, decisions, and next steps | Separate projects; inspect, edit, delete, and disable memory at any time |
+| Meeting preparation | Assemble agenda from selected notes and authorized calendar entries | Read-only initially; no implicit recording or transcription |
+| Meeting follow-up | Turn supplied notes into proposed tasks and draft messages | Task creation reviewed; sending messages requires explicit authorization |
+| Routine automation | Named trigger/action sequences such as a work-start routine | Narrow saved scopes, visible history, pause and delete controls |
+| Computer care | Explain battery, disk, thermal, and process information where available | Report measurements and uncertainty; no automatic cleanup or process termination |
+| Command assistance | Explain and optionally execute a command in a selected project | Show command, working directory, expected effects, and output; consequential commands require review |
+| Local search | Find files and optionally search indexed contents | User-selected folders, bounded indexing, exclusions, and source links |
+| Clipboard handoff | Clean copied text, extract links, or save a supplied snippet | Read only when invoked; no background clipboard history |
+| Daily wrap-up | Draft a summary of completed work and a next-step note | Use enabled sources only; save on request or within an explicitly configured routine |
+
+### Make the work visible through Molt
+
+Use a folder-carrying pose for organization, glasses for reading, a tiny desk for focus, and a backpack for saved items. A result card appears when real work completes. Learned named routines appear as tricks in the creature interface, but use the same explicit automation permissions as any other tool.
+
+Clicking Molt's activity cue shows the current operation, inputs, progress, required decision, and stop control. Animation must reflect actual execution state: a “thinking” loop cannot substitute for honest progress or an error message.
+
+### Initial limits
+
+Do not implement an unrestricted “control my entire computer” loop. Ship a small, tested tool catalog before general UI automation. Apps differ in scripting and accessibility support; unsupported actions should fail clearly without repeated blind clicks.
+
+## 23. Keyless local intelligence
+
+### What is feasible
+
+Molt can be a fully functional **local AI application powered by an existing language model**, without an API key, account, or per-request provider fee. Creating and training a new foundation model called Molt is a different undertaking and is not required for this product.
+
+Local inference still consumes RAM, disk space, battery, and compute. Initial model acquisition normally requires a download, or a user can import a compatible model file. After installation, supported text workflows can run offline. Internet browsing, model updates, and external service integrations still require connectivity and may require their own authentication.
+
+### Default architecture
+
+- Place inference behind `LocalModelRuntime`, separate from deterministic simulation and tool execution.
+- Start with a `llama.cpp` integration spike using a pinned, reviewed version and supported model format. Its upstream project supports local inference and Apple silicon acceleration through Metal.
+- Prefer an app-managed isolated worker with bounded IPC over an exposed HTTP server. A runtime crash must not crash the pet or corrupt a save.
+- Validate runtime packaging, deployment target, code-signing implications, cancellation, and architecture support before selecting the shipping integration.
+- Offer a curated, versioned model manifest with file hashes, download size, license, compatibility, and measured resource requirements. Choose the actual model after evaluating quality and redistribution terms; do not claim every open-weight model is freely redistributable.
+- No prerequisite Ollama installation, terminal setup, or third-party account for the standard experience. Optional advanced model imports can be added after the managed path works.
+- Never bundle an API credential or secretly route requests to a paid provider.
+
+### Hardware-aware setup
+
+Detect available memory, processor architecture, free storage, and runtime compatibility. Offer a small model first, with stronger options only when benchmarked on that hardware class. Do not promise model quality or speed from parameter count alone.
+
+Proposed evaluation categories: compact models for classification and rewriting, medium models for conversation and planning, and optional vision models for screen help. Context length and quantization affect memory substantially. Determine supported combinations experimentally, including Intel support; the non-AI companion remains usable on the baseline OS even where a selected runtime is unavailable.
+
+Show download progress, cancel/retry, disk requirements, and uninstall controls. Lazy-load the model on first use, support manual unload, and release idle model memory according to preferences. Do not continuously run the model to animate the creature.
+
+### First AI functions
+
+- Conversational help grounded in approved personal context.
+- Summarize a supplied note or document.
+- Rewrite selected text and propose task breakdowns.
+- Explain an explicitly supplied error log.
+- Turn natural-language requests into validated proposals for the small tool catalog.
+- Generate short optional creature dialogue while deterministic rules maintain needs, cooldowns, and evolution.
+
+### Grounding and memory
+
+Use local search and explicit source references for personal answers. Start with keyword/full-text retrieval before adding local embeddings. Keep durable user facts separate from generated guesses and conversation transcripts. Offer “remember this” explicitly; do not silently retain every attached document.
+
+A model may be wrong or produce invalid tool requests. Schema validation, permission checks, and real tool results determine what happens. Never claim an action succeeded because the model wrote a success sentence.
+
+**Acceptance:** A fresh installation can enable AI without entering an API key; after model installation, a network-disabled test can complete supported text workflows. Cancellation works, model failure leaves the pet usable, and no tool executes from unvalidated generated text.
+
+## 24. Agent execution, review, and recovery
+
+### Three user-facing modes
+
+1. **Observe:** read specifically enabled context.
+2. **Suggest:** produce a concrete proposal without changing external state.
+3. **Act:** execute an explicit request or a narrowly approved saved routine.
+
+The user can always see which mode applies. Model installation is not permission to observe the screen or manipulate files.
+
+### Execution pipeline
+
+User request → select permitted context → model or deterministic planner → typed tool proposal → validate arguments and capability scope → preview/review when required → execute → verify actual result → record outcome → offer undo when possible.
+
+Suggested first tools: `openWorkspace`, `createTask`, `saveNote`, `searchApprovedFiles`, `startFocus`, and `proposeFileMoves`. Add command execution and screen/accessibility control only after scope enforcement and recovery tests pass.
+
+### Required controls
+
+- A visible job list with queued, running, awaiting review, completed, canceled, and failed states.
+- Per-job cancellation, timeouts, maximum steps, and no infinite autonomous retry loop.
+- Project/folder scopes and an explicit allowlist of executable tool types.
+- Never treat text inside files, web pages, emails, or tool output as permission or new user instructions.
+- Preview exact file paths, collisions, destinations, and counts before a batch mutation.
+- Revalidate before executing if files or context changed after review.
+- Record reversible operations with stable identifiers. Undo must detect intervening edits instead of overwriting them.
+- Never imply full rollback for external messages, shell commands, or other irreversible side effects.
+- Persist completion records so restart cannot repeat a mutation or send the same operation twice.
+- Show a factual failure and partial results when only part of an operation succeeds.
+- Keep audit details local, apply retention controls, and avoid storing secrets or unnecessary file contents.
+
+### Automation builder
+
+Start with explicit manual triggers and scheduled routines, then add well-defined app lifecycle triggers. Each routine displays its trigger, permitted inputs, actions, scopes, and review points. Include a master pause switch and quiet hours. No autonomous messaging, deletion, installation, or purchases merely because a model recommends them.
+
+## 25. Revised implementation sequence and acceptance gates
+
+This order supersedes the sequence where it deferred all AI indefinitely or assumed a separate dashboard. Existing creature, organization, games, and creator-pack requirements remain part of the roadmap.
+
+1. **Foundation and island shell:** preserve saves; implement screen geometry, expanded/collapsed states, shortcut registration/remapping, focus behavior, menu bar recovery, and notchless fallback. Move existing app features into the island without duplicating state.
+2. **Creature and interaction depth:** deliver identity, art, animation, customization, cooldowns, training, one game, and journal. Keep low-cost deterministic behavior independent of AI.
+3. **Practical island tools:** Today, tasks, notes, reminders, focus, workspace rituals, explicit file/text handoff, and local project search. These should work before natural-language interpretation is added.
+4. **Local AI release:** model installer, isolated runtime, local chat, grounded document summaries, project memory, and typed proposals. Measure supported hardware and publish honest limits.
+5. **Bounded agent actions:** a small validated tool catalog, review cards, real execution status, cancellation, durable action records, and undo where safe. Add file organization only after recovery tests pass.
+6. **Richer context:** opt-in activity summaries, calendar, screen help, and carefully scoped accessibility integration. Gate each independently and test denied/revoked permissions.
+7. **Expanded world and ecosystem:** additional games, home, personality/evolution, creator packs, routines, and optional stronger local models.
+
+### Additional verification
+
+- Geometry fixtures and manual testing on notched, notchless, scaled, and multiple displays.
+- Shortcut conflicts, keyboard layouts, menu bar auto-hide, focus restoration, and unsaved draft preservation.
+- Network-disabled local inference tests after installation; cancel during download and generation.
+- Model checksum mismatch, insufficient disk/RAM, worker crashes, malformed output, and unsupported architecture.
+- Tool proposal tests for path traversal, unapproved folders, stale previews, malicious document instructions, duplicate requests, and partial failure.
+- Profile resting pet separately from active AI. The earlier lightweight idle budget does not describe loaded-model memory or inference CPU/GPU use.
+- Ensure sleep and wake do not resume a consequential agent action without reconciling its state.
+
+### Technical references
+
+- [Apple NSScreen documentation](https://developer.apple.com/documentation/appkit/nsscreen): display geometry and safe-area APIs.
+- [Apple auxiliaryTopLeftArea](https://developer.apple.com/documentation/appkit/nsscreen/auxiliarytopleftarea): visible area next to the camera housing.
+- [Apple keyboard guidance](https://developer.apple.com/design/human-interface-guidelines/keyboards): shortcut conventions and system conflicts.
+- [llama.cpp upstream](https://github.com/ggml-org/llama.cpp): local inference runtime and supported acceleration. Verify the pinned release during implementation.
+
+
+## 26. Confirmed AI delivery plan: Ollama during development, managed runtime in production
+
+**Decision:** Use the developer's existing Ollama installation to build and test Molt's AI features. Ordinary users of the released application must not need to install Ollama, run terminal commands, create an account, or supply an API key for local AI. This is an implementation requirement, not a capability already shipped.
+
+### Development path
+
+- Implement an `OllamaProvider` behind a shared `InferenceProvider` protocol.
+- Connect to the local Ollama service, list installed models, and let the developer select a compatible local model.
+- Support streamed responses, cancellation, timeouts, unavailable-service errors, and model capability checks.
+- Keep local and cloud-backed models clearly distinguished. Development testing of the offline promise must use a genuinely local model.
+- Use this provider to develop chat, personality prompts, retrieval, structured tool proposals, and agent review interfaces.
+- Do not hardcode one developer's installed model name or filesystem paths into release behavior.
+- Reference: [Ollama local API documentation](https://docs.ollama.com/api/introduction).
+
+### Production path
+
+- Implement a `ManagedLocalProvider` behind the same protocol, using the app-managed runtime selected and verified in section 23.
+- Package the runtime or isolated worker with Molt. Installing Molt must not install or depend on a separate Ollama application or service.
+- Download model weights separately after the user chooses Enable AI. The default application installer remains usable without them.
+- Keep model storage, lifecycle, updates, compatibility, and removal under Molt's own settings.
+- Retain Ollama as an optional advanced provider for people who already use it; never make it the default prerequisite.
+- Sharing a provider interface does not guarantee identical model behavior. Validate prompts, streaming, context limits, and tool-output handling independently for each supported provider/model combination.
+
+### First-run experience for released Molt
+
+1. Install and open Molt. The creature, organization tools, and deterministic activities work immediately.
+2. Offer an optional Enable AI step with a plain explanation of local processing and resource use.
+3. Check runtime support, available memory, and free storage. Show a tested compatible model option, download size, and license information.
+4. Let the user start, postpone, or cancel the download. Support recovery from interrupted downloads.
+5. Verify model integrity, load it, and run a small readiness check.
+6. Show Local AI ready in the island. All supported inference stays on the Mac without an API key.
+7. If setup fails or the hardware is unsupported, preserve the fully usable non-AI companion and explain the limitation. Do not silently switch to cloud inference.
+
+### Model management
+
+Provide installed size, selected model, compatibility status, download progress, retry, update, switch, unload, and uninstall controls. Deleting a model must not delete the pet, tasks, notes, or memories. Updates should preserve the previous working installation until the new version is verified, subject to sufficient disk space.
+
+A model download is normally required once per installation. Additional downloads occur only for explicit model changes or updates. Importing a compatible local model may provide an advanced offline setup path. Local AI uses the user's hardware and power; no provider fee does not mean zero resource cost.
+
+### Provider-neutral application design
+
+The companion controller, chat interface, retrieval system, and tool executor must not depend directly on Ollama request types. Normalize messages, streaming events, model capabilities, errors, and typed proposals at the provider boundary.
+
+Keep the permission and execution layer outside the language model. Switching providers must never broaden folder access, bypass an action review, or alter the cooldown/reward system. The deterministic simulation remains authoritative for creature state.
+
+### Required work before releasing local AI
+
+- Package and test the managed runtime on every supported release architecture and OS combination.
+- Verify runtime and model distribution licenses, notices, and integrity checks.
+- Add the production model installer, compatibility checks, lifecycle controls, and isolated-worker recovery.
+- Test on a clean Mac or clean user environment without Ollama, developer tooling, or preexisting model caches.
+- Complete setup without Terminal, account creation, or API keys.
+- After model installation, disable network access and verify supported chat, supplied-document assistance, and bounded local tools.
+- Test low disk space, memory pressure, interrupted downloads, invalid model files, cancellation, restart, and runtime crashes.
+- Measure active AI separately from idle companion performance and document tested hardware limits.
+
+**Release gate:** Do not advertise effortless keyless AI for ordinary users until the managed runtime and clean-install flow pass these checks. A working Ollama development integration alone does not satisfy this requirement.

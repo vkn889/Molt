@@ -6,7 +6,7 @@ A little life, alongside yours. A native macOS pixel-art companion with a person
 
 ## Run
 
-Requires macOS 13+ and Swift 5.9+. No runtime packages, account, or internet connection are required.
+The non-AI companion requires macOS 13+ and Swift 5.9+ to build. It needs no account or network connection. Optional managed AI requires macOS 13.3+, at least 4 GB RAM, and a one-time model download.
 
 ```sh
 swift run Molt
@@ -15,7 +15,7 @@ swift run Molt
 For the full desktop experience, including macOS notifications and launch at login, use the packaged app:
 
 ```sh
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer ./scripts/package.sh 0.2.0
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer ./scripts/package.sh 0.3.0
 open dist/Molt.app
 ```
 
@@ -25,9 +25,10 @@ The package script creates a universal Apple Silicon / Intel app and DMG. Set `M
 
 Name and personalize a fin-eared pixel creature. Choose palettes, markings, body proportions and earned accessories. Save outfits, decorate a tiny home, teach eight tricks, send Molt on fictional explorations, and grow into different forms. Care and interests shape evolution; unlocked skills and keepsakes never disappear through neglect. Vacation mode pauses care and excludes paused time from evolution age.
 
-Molt has a transparent floating window, menu bar controls, and a native dashboard:
+Molt has a transparent floating companion, menu bar controls, and a notch-aware island. Command-Shift-Space toggles the island; Command-Shift-M is available if the default conflicts. Every existing dashboard feature lives inside the expanded island:
 
 - **Today:** three chosen priorities, upcoming reminders/calendar events, focus, daily review and gentle routines.
+- **Ask Molt:** local chat, supplied-text assistance, project memory, reviewed actions, file organization and workspace rituals.
 - **Activity:** honest system-health readings and optional app-time estimates.
 - **Molt:** needs, cooldowns, training, discovery book, three games and a bounded memory journal.
 - **Home:** decoration, wardrobe, portraits, a pixel drawing canvas and visual melody score.
@@ -59,7 +60,7 @@ Cooldown groups prevent renamed actions from bypassing limits. A daily 60-XP sof
 
 ## Privacy and data
 
-Core Molt makes no network calls. System readings stay in memory. App tracking, notifications, and calendar access have separate controls; tracking starts off. Calendar integration reads only selected calendars and never edits events. No keystrokes, clipboard, window titles, screenshots, browser history, audio, or document contents are collected.
+Core Molt makes no network calls. System readings stay in memory. App tracking, notifications, and calendar access have separate controls; tracking starts off. Calendar integration reads only selected calendars and never edits events. No background keystroke, clipboard, window-title, screenshot, browser-history, audio, or document collection occurs. Ask Molt reads text files only when explicitly attached, and reads the clipboard only through Paste once.
 
 App-time records are estimates. Known sleep/session gaps are excluded, but idle time and private browsing cannot be reliably inferred. Exclude a browser’s bundle ID if you do not want it tracked. Exclusions apply before recording; raw intervals expire after seven days. Forgetting activity history does not delete your pet or organization tools.
 
@@ -89,7 +90,7 @@ Three bundled examples have distinct mechanics: classic **Molt**, slower-growing
 swift test
 python3 scripts/check-copy.py
 swift build -c release
-./scripts/package.sh 0.2.0
+./scripts/package.sh 0.3.0
 ```
 
 Tests cover migration, offline decay, DST, vacation, clock rollback, cooldown groups, duplicate/early completion, reward caps, all games, SQLite round trips, unsafe packs and tracking exclusions. The eight-hour test simulates ticks; it is not a real-time performance certification. See [architecture](docs/architecture.md), [verification](docs/verification.md), and [contributing](CONTRIBUTING.md).
@@ -97,3 +98,20 @@ Tests cover migration, offline decay, DST, vacation, clock rollback, cooldown gr
 Push a `v*` tag to build and publish a DMG through GitHub Actions. Bundles receive a local ad-hoc signature for Apple Silicon execution. Releases have no Developer ID signature or notarization yet. macOS may require Open Anyway approval in Privacy & Security. There is no automatic updater.
 
 AI dialogue, rich browser/document integrations, sync, social features and an online marketplace remain outside this offline release, as specified by the roadmap. Cosmetic expansion and extended hardware/accessibility qualification are tracked in [release scope](docs/release-scope.md).
+
+## Optional local intelligence
+
+Packaged managed AI uses a pinned llama.cpp worker over pipes, with no listening server or Ollama prerequisite. Prepare the runtime before packaging:
+
+```sh
+./scripts/prepare-runtime.sh
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer ./scripts/package.sh 0.3.0
+```
+
+In Ask Molt, choose **Managed local**, download the compact Qwen2.5 0.5B Q4_K_M model, then connect and send a request. The download is 491 MB, SHA-256 verified, and licensed under Apache 2.0. It is a compact starting model with limited reasoning quality. Generation has a 180-second deadline and a token cap. The worker exits after each response, releasing its model memory. Interrupted downloads can resume when the server supports it. Removing weights preserves all companion and organization data.
+
+For development, select **Ollama (advanced)** and Connect / refresh. Molt discovers installed models at loopback port 11434, validates completion capability and rejects cloud-backed metadata. No model name is hardcoded into the Ollama path. See the [Ollama API](https://docs.ollama.com/api/chat).
+
+Drafts and responses stay in the current app session unless explicitly saved. Only attached text and specifically enabled project memory enter the request. A model can propose a task, note, or focus session; schema validation and an explicit review are required before execution. Generated prose never executes commands. Workspace folders are opened only from saved, approved projects. Tasks and notes support undo only while unchanged. File moves have exact-path previews, collision checks, durable receipts, and guarded undo. Scheduled rituals prepare review cards rather than performing unattended mutations.
+
+See [AI implementation and qualification](docs/local-ai.md) for tested behavior and remaining release gates. Runtime/model downloads use upstream servers; inference does not use a cloud fallback.

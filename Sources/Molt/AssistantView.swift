@@ -13,6 +13,11 @@ struct AssistantView: View {
         Text("LOCAL · SUGGEST").font(.caption.monospaced()).foregroundStyle(.secondary)
       }
       Text("Your words stay on this Mac. Only the text and project memory you select below are supplied to the model.").font(.callout)
+      Picker("AI provider", selection: $assistant.providerKind) {
+        Text("Managed local").tag("managed")
+        Text("Ollama (advanced)").tag("ollama")
+      }.disabled(assistant.running).onChange(of: assistant.providerKind) { _ in assistant.models = []; assistant.selectedModel = "" }
+      if assistant.providerKind == "managed" { ManagedModelView(manager: assistant.modelManager, inferenceRunning: assistant.running) }
       HStack {
         Button("Connect / refresh", action: assistant.refresh).disabled(assistant.running)
         Picker("Local model", selection: $assistant.selectedModel) {
@@ -32,7 +37,8 @@ struct AssistantView: View {
         Button("Paste once", action: assistant.clipboard)
         Spacer()
         if assistant.running { Button("Stop", action: assistant.cancel) }
-        else { Button("Send", action: assistant.send).disabled(assistant.selectedModel.isEmpty || assistant.draft.isEmpty) }
+        else { Button("Interpret as action", action: assistant.interpret).disabled(assistant.selectedModel.isEmpty || assistant.draft.isEmpty)
+          Button("Send", action: assistant.send).disabled(assistant.selectedModel.isEmpty || assistant.draft.isEmpty) }
       }
       if !assistant.attachment.isEmpty {
         DisclosureGroup("Supplied source: \(assistant.attachmentName)") {
@@ -50,6 +56,7 @@ struct AssistantView: View {
         }
       }
       projectPanel
+      FileOrganizerView(organizer: assistant.fileOrganizer)
       MoltCard(title: "Explicit actions") {
         Text("These controls create a concrete proposal. Nothing happens until you review and approve it.").font(.caption)
         HStack {
@@ -71,7 +78,7 @@ struct AssistantView: View {
           }
         }
       }
-      Text("Ollama is the optional development provider. The self-contained production AI installer is not yet qualified for release. No cloud fallback, shell execution, screen capture, or background clipboard collection is enabled.").font(.caption).foregroundStyle(.secondary)
+      Text("Ollama is an optional advanced provider. Managed local uses a packaged worker and a separately downloaded compact model. Clean-install and Intel qualification remain release gates. No cloud fallback, shell execution, screen capture, or background clipboard collection is enabled.").font(.caption).foregroundStyle(.secondary)
     }.onAppear { inputFocused = true }
   }
   private var projectPanel: some View {
@@ -103,6 +110,28 @@ struct AssistantView: View {
           Button(file.path) { assistant.attach(file) }.font(.caption).lineLimit(2)
         }
       }
+    }
+  }
+}
+
+struct ManagedModelView: View {
+  @ObservedObject var manager: ModelManager
+  var inferenceRunning: Bool
+  var body: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Text(manager.message).font(.caption)
+      if manager.busy {
+        ProgressView(value: manager.progress)
+        Button("Cancel download", action: manager.cancel)
+      } else {
+        HStack {
+          Button(manager.installed ? "Reinstall verified model" : "Download compact model", action: manager.install)
+            .disabled(!manager.runtimeAvailable || inferenceRunning)
+          if manager.installed { Button("Remove model", action: manager.uninstall).disabled(inferenceRunning) }
+          Link("Model and license", destination: URL(string: "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF")!)
+        }
+      }
+      if !manager.runtimeAvailable { Text("Managed worker is absent from this development build. Packaged builds include it; Ollama is available under Advanced.").font(.caption) }
     }
   }
 }

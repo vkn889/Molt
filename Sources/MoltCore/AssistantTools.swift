@@ -9,7 +9,10 @@ public struct ToolProposal: Codable, Identifiable, Sendable {
   public var text: String
   public var minutes: Int?
   public init(tool: AssistantTool, text: String, minutes: Int? = nil) {
-    id = UUID(); self.tool = tool; self.text = text; self.minutes = minutes
+    id = UUID()
+    self.tool = tool
+    self.text = text
+    self.minutes = minutes
   }
   public func validate() throws {
     guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, text.count <= 8000 else {
@@ -31,6 +34,7 @@ public struct AssistantJob: Codable, Identifiable {
   public var status = "awaiting review"
   public var detail = ""
   public var created = Date()
+  public var resultSnapshot: String?
   public init(_ proposal: ToolProposal) { self.proposal = proposal }
 }
 public struct ProjectMemory: Codable, Identifiable {
@@ -40,16 +44,23 @@ public struct ProjectMemory: Codable, Identifiable {
   public var facts = ""
   public var nextStep = ""
   public var enabled = true
-  public init(name: String, folder: String) { self.name = name; self.folder = folder }
+  public init(name: String, folder: String) {
+    self.name = name
+    self.folder = folder
+  }
 }
 public struct AssistantWorkspace: Codable {
+  public var schemaVersion: Int? = 1
   public var projects: [ProjectMemory] = []
   public var jobs: [AssistantJob] = []
+  public var rituals: [WorkspaceRitual]?
+  public var ritualsPaused: Bool?
   public init() {}
   public mutating func reconcile() {
     for index in jobs.indices where jobs[index].status == "running" {
       jobs[index].status = "failed"
-      jobs[index].detail = "Interrupted. Check the result before creating a new request. This action will not replay."
+      jobs[index].detail =
+        "Interrupted. Check the result before creating a new request. This action will not replay."
     }
     jobs = Array(jobs.suffix(100))
   }
@@ -79,18 +90,39 @@ public enum ApprovedFiles {
   }
   public static func search(_ query: String, folder: URL) -> [URL] {
     guard !query.isEmpty,
-      let files = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: [.isRegularFileKey],
-        options: [.skipsHiddenFiles, .skipsPackageDescendants]) else { return [] }
+      let files = FileManager.default.enumerator(
+        at: folder, includingPropertiesForKeys: [.isRegularFileKey],
+        options: [.skipsHiddenFiles, .skipsPackageDescendants])
+    else { return [] }
     var results: [URL] = []
     var visited = 0
     for case let file as URL in files {
       visited += 1
       if visited > 2000 || results.count >= 40 { break }
-      if ["node_modules", "build", "dist", "vendor"].contains(file.lastPathComponent) { files.skipDescendants(); continue }
+      if ["node_modules", "build", "dist", "vendor"].contains(file.lastPathComponent) {
+        files.skipDescendants()
+        continue
+      }
       guard contains(file, in: folder),
-        (try? file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { continue }
+        (try? file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
+      else { continue }
       if file.lastPathComponent.localizedCaseInsensitiveContains(query) { results.append(file) }
     }
     return results
+  }
+}
+
+public struct WorkspaceRitual: Codable, Identifiable {
+  public var id = UUID()
+  public var name: String
+  public var projectID: UUID?
+  public var focusMinutes: Int
+  public var scheduled: Date?
+  public var enabled = true
+  public init(name: String, projectID: UUID?, focusMinutes: Int, scheduled: Date? = nil) {
+    self.name = name
+    self.projectID = projectID
+    self.focusMinutes = focusMinutes
+    self.scheduled = scheduled
   }
 }

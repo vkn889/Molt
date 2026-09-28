@@ -123,6 +123,7 @@ import SwiftUI
   @objc private func woke() { tick() }
   func tick(event: String? = nil) {
     let now = self.now
+    assistant.checkRituals(at: now)
     state.companion?.clockCorrected = Date() < (state.companion?.lastReliableClock ?? .distantPast)
     state.companion?.lastReliableClock = now
     Simulation.advance(&state, definition: definition, to: now)

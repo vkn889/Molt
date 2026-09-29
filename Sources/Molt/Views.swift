@@ -109,7 +109,7 @@ struct CompanionView: View {
           }.padding(compact ? 16 : 26)
         }
       }
-    }.frame(minWidth: compact ? 0 : 930, minHeight: compact ? 0 : 720).background(MoltTheme.paper)
+    }.frame(minWidth: compact ? 0 : 930, minHeight: compact ? 0 : 720).background(compact ? Color.clear : MoltTheme.paper)
       .foregroundStyle(
         MoltTheme.ink
       )
@@ -137,7 +137,7 @@ struct AdoptionView: View {
             $0.adoptionComplete = true
             $0.remember("Our first day together.", kind: "adoption", at: Date())
           }
-        }.buttonStyle(.borderedProminent).tint(MoltTheme.green)
+        }.buttonStyle(GlassButtonStyle()).tint(MoltTheme.green)
       }
       Button("Skip for now") { controller.changeCompanion { $0.adoptionComplete = true } }.font(
         .caption)
@@ -213,7 +213,7 @@ struct TodayView: View {
             Text("50 minutes").tag(50)
           }
           Button("Start focus") { controller.focus(minutes: minutes, task: selectedTask) }
-            .buttonStyle(.borderedProminent).tint(MoltTheme.green)
+            .buttonStyle(GlassButtonStyle()).tint(MoltTheme.green)
         }
         Picker("Work on", selection: $selectedTask) {
           Text("Open focus").tag(nil as UUID?)

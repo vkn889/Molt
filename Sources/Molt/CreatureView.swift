@@ -194,7 +194,7 @@ struct MoltCard<Content: View>: View {
       if !title.isEmpty { Text(title).font(MoltTheme.display(18)) }
       content
     }.padding(20).frame(maxWidth: .infinity, alignment: .leading).background(
-      Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 18)
-    ).overlay(RoundedRectangle(cornerRadius: 18).stroke(MoltTheme.green.opacity(0.10)))
+      GlassSurface(radius: 18)
+    )
   }
 }

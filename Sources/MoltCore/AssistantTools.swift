@@ -55,6 +55,7 @@ public struct AssistantWorkspace: Codable {
   public var jobs: [AssistantJob] = []
   public var rituals: [WorkspaceRitual]?
   public var ritualsPaused: Bool?
+  public var memories: [ApprovedMemory]?
   public init() {}
   public mutating func reconcile() {
     for index in jobs.indices where jobs[index].status == "running" {

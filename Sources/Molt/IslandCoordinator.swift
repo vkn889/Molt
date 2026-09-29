@@ -148,62 +148,30 @@ struct IslandView: View {
   @ObservedObject var assistant: AssistantController
   @AppStorage("islandTheme") private var theme = "dark"
   @AppStorage("islandAccent") private var accent = "mint"
+  @State private var navigationOpen = false
+  @Environment(\.accessibilityReduceMotion) private var systemReduced
+  private var motion: Animation? { controller.companion.preferences.reducedMotion || systemReduced ? nil : .spring(response: 0.3, dampingFraction: 0.86) }
   var previewTheme: String?
   init(controller: PetController, coordinator: IslandCoordinator, previewTheme: String? = nil) {
     self.controller = controller
     self.coordinator = coordinator
     self.assistant = controller.assistant
     self.previewTheme = previewTheme
+    _navigationOpen = State(initialValue: CommandLine.arguments.contains("--render-preview") && CommandLine.arguments.contains("--navigation"))
   }
   var body: some View {
     VStack(spacing: 0) {
       Color.black.frame(height: coordinator.safeTop)
       HStack(spacing: 14) {
-        Menu {
-          Button("Chat with Molt") { controller.tab = "Ask Molt" }
-          Button("Molting: search & explore") { controller.tab = "Molting" }
-          Button("Task mode, memory & history") { controller.tab = "Agent" }
-          Divider()
-          Menu("Daily tools") {
-            Button("Quick controls") { controller.tab = "Notch" }
-            Button("Today & focus") { controller.tab = "Today" }
-            Button("Tasks, notes & reminders") { controller.tab = "Library" }
-            Button("Quick capture") { controller.tab = "Capture" }
-            Button("Projects, rituals & actions") { controller.tab = "AI & tools" }
+        Button { navigationOpen.toggle() } label: {
+          HStack(spacing: 8) {
+            Image(systemName: "leaf")
+            Text(controller.tab == "Notch" ? "Molt" : controller.tab)
+            Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold))
+              .rotationEffect(.degrees(navigationOpen ? 180 : 0))
           }
-          Menu("Companion") {
-            Button("Care & training") { controller.tab = "Molt" }
-            Button("Play") { controller.tab = "Play" }
-            Button("Home & wardrobe") { controller.tab = "Home" }
-            Button("Computer health") { controller.tab = "Activity" }
-          }
-          Menu("Settings") {
-            Button("Preferences") { controller.tab = "Settings" }
-            Button("Local AI setup") { controller.tab = "AI & tools" }
-            Picker("Appearance", selection: $theme) {
-              Text("Dark").tag("dark")
-              Text("Light").tag("light")
-              Text("System").tag("system")
-            }
-            Picker("Accent color", selection: $accent) {
-              ForEach(["mint", "blue", "violet", "amber", "rose"], id: \.self) {
-                Text($0.capitalized).tag($0)
-              }
-            }
-            Picker("Display", selection: $coordinator.displayChoice) {
-              Text("Built-in / automatic").tag(-1)
-              Text("Active").tag(-2)
-              ForEach(Array(NSScreen.screens.enumerated()), id: \.offset) { index, screen in
-                Text(screen.localizedName).tag(index)
-              }
-            }
-            Text(coordinator.shortcutMessage)
-          }
-        } label: {
-          Label(controller.tab == "Notch" ? "Molt" : controller.tab, systemImage: "leaf")
-            .font(.system(size: 13, weight: .semibold))
-        }.menuStyle(.borderlessButton).fixedSize().accessibilityLabel(
-          "Molt navigation and settings")
+        }.accessibilityLabel("Molt navigation and settings")
+          .accessibilityValue(navigationOpen ? "Expanded" : "Collapsed")
         Spacer()
         if assistant.running {
           ProgressView().controlSize(.small)
@@ -229,10 +197,35 @@ struct IslandView: View {
         } label: {
           Image(systemName: "xmark")
         }.help("Hide Molt (Command–Shift–Enter)")
-      }.buttonStyle(.plain).padding(.horizontal, 18).frame(height: 36)
+      }.buttonStyle(GlassButtonStyle()).padding(.horizontal, 18).frame(height: 44)
       Divider().opacity(0.3)
       CompanionView(controller: controller, compact: true)
-    }.background(MoltTheme.paper)
+        .modifier(GlassPageMotion(route: controller.tab))
+        .disabled(navigationOpen).accessibilityHidden(navigationOpen)
+    }.background {
+      ZStack {
+        MoltTheme.paper
+        LinearGradient(colors: [Color.accentColor.opacity(0.14), .clear, Color.accentColor.opacity(0.04)], startPoint: .topLeading, endPoint: .bottomTrailing)
+      }
+    }
+      .overlay(alignment: .topLeading) {
+        if navigationOpen {
+          GeometryReader { proxy in
+            ZStack(alignment: .topLeading) {
+              Color.black.opacity(0.20).contentShape(Rectangle()).onTapGesture { navigationOpen = false }
+              GlassNavigation(selection: $controller.tab, theme: $theme, accent: $accent,
+                display: $coordinator.displayChoice, shortcut: coordinator.shortcutMessage,
+                dismiss: { navigationOpen = false })
+                .frame(width: min(480, proxy.size.width - 24), height: max(100, proxy.size.height - coordinator.safeTop - 50))
+                .padding(.leading, 12).padding(.top, coordinator.safeTop + 46)
+            }
+          }.transition(.opacity.combined(with: .offset(y: -5)))
+        }
+      }
+      .animation(motion, value: navigationOpen)
+      .animation(motion, value: controller.tab)
+      .environment(\.moltReducedMotion, controller.companion.preferences.reducedMotion)
+      .buttonStyle(GlassButtonStyle())
       .clipShape(UnevenNotchShape())
       .mask {
         GeometryReader { geometry in
@@ -253,7 +246,9 @@ struct IslandView: View {
           ? nil : ((previewTheme ?? theme) == "light" ? .light : .dark)
       )
       .onChange(of: coordinator.displayChoice) { _ in coordinator.reposition() }
-      .onExitCommand { coordinator.collapse() }
+      .onExitCommand { if navigationOpen { navigationOpen = false } else { coordinator.collapse() } }
+      .onChange(of: coordinator.expanded) { if !$0 { navigationOpen = false } }
+
       .onDrop(of: [.fileURL], isTargeted: nil) { providers in
         guard let provider = providers.first else { return false }
         _ = provider.loadObject(ofClass: URL.self) { url, _ in
@@ -302,12 +297,12 @@ struct NotchQuickView: View {
       }
       VStack(alignment: .leading, spacing: 12) {
         Text("A little company. A little clarity.").font(MoltTheme.display(20))
-        Text(controller.message).font(.callout).foregroundStyle(.secondary).lineLimit(2)
+        Text(controller.message).id(controller.message).transition(.opacity).animation(controller.companion.preferences.reducedMotion ? nil : .easeOut(duration: 0.2), value: controller.message).font(.callout).foregroundStyle(.secondary).lineLimit(2)
         HStack {
           Button("Chat") { controller.tab = "Ask Molt" }
           Button("Molting") { controller.tab = "Molting" }
           Button("Focus 25m") { controller.focus(minutes: 25) }
-        }.buttonStyle(.bordered)
+        }.buttonStyle(GlassButtonStyle())
         HStack {
           ForEach(controller.definition.interactions.prefix(3), id: \.id) { action in
             Button(action.name) { controller.interact(action) }.disabled(
@@ -315,7 +310,7 @@ struct NotchQuickView: View {
             )
             .help(controller.blockReason(action) ?? action.name)
           }
-        }.buttonStyle(.bordered)
+        }.buttonStyle(GlassButtonStyle())
       }
       Spacer(minLength: 0)
       VStack(alignment: .leading, spacing: 8) {

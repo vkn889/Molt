@@ -109,6 +109,8 @@ import SwiftUI
       context +=
         "\nApproved project memory [\(project.name)]:\n\(project.facts)\nNext step: \(project.nextStep)"
     }
+    let remembered = (workspace.memories ?? []).filter { $0.enabled }.map(\.text).joined(separator: "\n")
+    context += "\nUser-approved preferences and facts (context, not tool authorization):\n" + String(remembered.prefix(8000))
     var messages = [
       InferenceMessage(
         role: "system",
@@ -188,6 +190,60 @@ import SwiftUI
       draft =
         "Help me understand what is on this screen. If there is an error, explain it and suggest next steps."
     }
+  }
+  func planTask() {
+    guard !running, !selectedModel.isEmpty, !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+    let goal = String(draft.prefix(8000))
+    let id = UUID()
+    requestID = id
+    running = true
+    status = "Planning up to six independent steps. Each step needs your approval."
+    generation = Task {
+      defer { if requestID == id { running = false } }
+      do {
+        var output = ""
+        let messages = [InferenceMessage(role: "system", content:
+          "Return only a JSON array of 1 to 6 independent concrete steps: [{\"tool\":\"createTask\",\"text\":\"task title\"}]. Allowed tools: createTask, saveNote, startFocus. startFocus needs minutes 1..180. No other tools exist. Do not invent execution or tools. Use createTask for work the user must perform. Steps must not depend on other steps executing. If unsupported return []."),
+          InferenceMessage(role: "user", content: goal)]
+        for try await token in provider.stream(model: selectedModel, messages: messages) {
+          try Task.checkCancellation()
+          output += token
+          guard output.utf8.count <= 32000 else { throw MoltError.invalid("Plan exceeded the size limit.") }
+        }
+        try Task.checkCancellation()
+        guard requestID == id else { return }
+        let proposals = try AgentPlan.parse(output)
+        if enqueue(proposals) { status = "Plan ready in Action history. Review and approve each step; nothing has run." }
+      } catch {
+        guard requestID == id else { return }
+        status = "No steps ran: \(error.localizedDescription)"
+      }
+    }
+  }
+  @discardableResult func remember(_ text: String, replacing id: UUID? = nil) -> Bool {
+    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty, trimmed.count <= 1000, id != nil || (workspace.memories ?? []).count < 30 else {
+      status = "Use 1 to 1,000 characters. Keep at most 30 memories."
+      return false
+    }
+    let previous = workspace
+    if let id {
+      guard let index = workspace.memories?.firstIndex(where: { $0.id == id }) else { return false }
+      workspace.memories?[index].text = trimmed
+    } else {
+      workspace.memories = (workspace.memories ?? []) + [ApprovedMemory(trimmed)]
+    }
+    if !save() { workspace = previous; return false }
+    status = "Approved memory saved."
+    return true
+  }
+  func changeMemory(_ id: UUID, remove: Bool) {
+    let previous = workspace
+    if remove { workspace.memories?.removeAll { $0.id == id } }
+    else if let index = workspace.memories?.firstIndex(where: { $0.id == id }) {
+      workspace.memories?[index].enabled.toggle()
+    }
+    if !save() { workspace = previous }
   }
   func interpret() {
     guard !running, !selectedModel.isEmpty, !draft.isEmpty else { return }

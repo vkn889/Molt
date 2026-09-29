@@ -4,6 +4,9 @@ import SwiftUI
 import WebKit
 
 @MainActor final class MoltingController: ObservableObject {
+  @Published var researchURLs = ""
+  @Published var researchSources: [ReadWebPage] = []
+  @Published var researchFailures: [String] = []
   @Published var query = ""
   @Published var browserURL: URL?
   @Published var currentURL: URL?
@@ -40,6 +43,33 @@ import WebKit
         status =
           "Page ready for review. Nothing has been sent to AI. Dynamic or restricted content may be unavailable."
       } catch { status = Task.isCancelled ? "Page read canceled." : error.localizedDescription }
+    }
+  }
+  func research() {
+    guard !busy else { return }
+    let lines = researchURLs.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+    guard (2...5).contains(lines.count), lines.allSatisfy({ URL(string: $0) != nil }) else {
+      status = "Provide two to five public HTTPS source URLs, one per line."
+      return
+    }
+    researchSources = []
+    researchFailures = []
+    busy = true
+    request = Task {
+      defer { busy = false }
+      for address in lines {
+        if Task.isCancelled { status = "Research stopped. Completed sources remain available."; return }
+        status = "Reading source \(researchSources.count + researchFailures.count + 1) of \(lines.count)…"
+        do {
+          let page = try await WebReader().read(URL(string: address)!)
+          try Task.checkCancellation()
+          researchSources.append(page)
+        } catch {
+          if Task.isCancelled { status = "Research stopped."; return }
+          researchFailures.append("\(address): \(error.localizedDescription)")
+        }
+      }
+      status = "Research ready: \(researchSources.count) sources, \(researchFailures.count) unavailable. Review before synthesizing."
     }
   }
   func cancel() { request?.cancel() }
@@ -86,6 +116,22 @@ private struct MoltingContent: View {
         } else {
           Button("Read page", action: model.readPage)
         }
+      }
+      DisclosureGroup("Research: compare multiple sources") {
+        Text("Use web search above to find sources, then add two to five URLs. Molt reads each public page and compares the excerpts locally.").font(.caption)
+        TextField("HTTPS source URLs, one per line", text: $model.researchURLs, axis: .vertical).lineLimit(3...6)
+        Button("Read sources", action: model.research).disabled(model.busy)
+        ForEach(Array(model.researchSources.enumerated()), id: \.offset) { _, page in
+          DisclosureGroup(page.url.absoluteString) { Text(page.text).font(.caption).textSelection(.enabled) }
+        }
+        ForEach(model.researchFailures, id: \.self) { Text($0).font(.caption) }
+        Button("Compare sources in chat") {
+          assistant.sharedImage = nil
+          assistant.attachment = model.researchSources.map { "Source: \($0.url.absoluteString)\n\(String($0.text.prefix(2000)))" }.joined(separator: "\n\n")
+          assistant.attachmentName = "Reviewed research sources"
+          assistant.draft = "Research question: \(model.query). Compare the supplied sources, cite each URL, identify disagreements and gaps, and distinguish evidence from inference."
+          onChat()
+        }.disabled(model.researchSources.count < 2)
       }
       Text(model.status).font(.caption)
       if let source = model.source {

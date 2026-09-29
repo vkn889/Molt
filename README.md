@@ -15,7 +15,7 @@ swift run Molt
 For the full desktop experience, including macOS notifications and launch at login, use the packaged app:
 
 ```sh
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer ./scripts/package.sh 0.4.0
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer ./scripts/package.sh 0.4.1
 open dist/Molt.app
 ```
 
@@ -92,7 +92,7 @@ Three bundled examples have distinct mechanics: classic **Molt**, slower-growing
 swift test
 python3 scripts/check-copy.py
 swift build -c release
-./scripts/package.sh 0.4.0
+./scripts/package.sh 0.4.1
 ```
 
 Tests cover migration, offline decay, DST, vacation, clock rollback, cooldown groups, duplicate/early completion, reward caps, all games, SQLite round trips, unsafe packs and tracking exclusions. The eight-hour test simulates ticks; it is not a real-time performance certification. See [architecture](docs/architecture.md), [verification](docs/verification.md), and [contributing](CONTRIBUTING.md).
@@ -107,7 +107,7 @@ Packaged managed AI uses a pinned llama.cpp worker over pipes, with no listening
 
 ```sh
 ./scripts/prepare-runtime.sh
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer ./scripts/package.sh 0.4.0
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer ./scripts/package.sh 0.4.1
 ```
 
 In Ask Molt, choose **Managed local**, download the compact Qwen2.5 0.5B Q4_K_M model, then connect and send a request. The download is 491 MB, SHA-256 verified, and licensed under Apache 2.0. It is a compact starting model with limited reasoning quality. Generation has a 180-second deadline and a token cap. The worker exits after each response, releasing its model memory. Interrupted downloads can resume when the server supports it. Removing weights preserves all companion and organization data.
@@ -117,3 +117,11 @@ For development, select **Ollama (advanced)** and Connect / refresh. Molt discov
 Drafts and responses stay in the current app session unless explicitly saved. Only attached text and specifically enabled project memory enter the request. A model can propose a task, note, or focus session; schema validation and an explicit review are required before execution. Generated prose never executes commands. Workspace folders are opened only from saved, approved projects. Tasks and notes support undo only while unchanged. File moves have exact-path previews, collision checks, durable receipts, and guarded undo. Scheduled rituals prepare review cards rather than performing unattended mutations.
 
 See [AI implementation and qualification](docs/local-ai.md) for tested behavior and remaining release gates. Runtime/model downloads use upstream servers; inference does not use a cloud fallback.
+
+## Agent tools
+
+Open **Task mode, memory & history** from the notch menu. A local model can propose up to six independent task, note, or focus actions from a goal. Each action requires individual review and approval; unsupported work becomes a task for you, not a claimed execution. Completed task and note creations support undo if unchanged.
+
+Approved memory lets you explicitly save, edit, pause, or forget preferences and facts. Enabled memories supply up to 8,000 characters of context to personal chat. Chat transcripts remain session-only.
+
+In Molting, search for sources and expand **Research: compare multiple sources**. Paste two to five public HTTPS URLs, review the extracted excerpts, and compare them in local chat with source citations. Restricted or unavailable sources are reported individually. This is a user-directed research workflow, not unattended web crawling.

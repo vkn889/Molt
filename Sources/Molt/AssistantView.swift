@@ -135,7 +135,7 @@ struct AssistantView: View {
         }
       }
       Text(
-        "Ollama is an optional advanced provider. Managed local uses a packaged worker and a separately downloaded compact model. Clean-install and Intel qualification remain release gates. No cloud fallback, shell execution, screen capture, or background clipboard collection is enabled."
+        "Ollama is an optional advanced provider. Managed local uses a packaged worker and a separately downloaded compact model. Clean-install and Intel qualification remain release gates. No cloud fallback, shell execution, or background clipboard collection is enabled. Screen help requires explicit capture and sharing."
       ).font(.caption).foregroundStyle(.secondary)
     }.onAppear { inputFocused = true }
   }

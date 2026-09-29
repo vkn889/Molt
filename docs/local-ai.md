@@ -2,7 +2,7 @@
 
 ## Implemented
 
-- A top-centered island below the screen's safe area, notchless fallback, built-in/active/selected display choice, collapse without discarding mounted drafts, menu-bar recovery, scoped Carbon shortcut registration, conflict feedback and an alternate binding. Passive resting state does not activate the app. Existing pet, organization, games, settings and capture share the original controller.
+- A hidden-at-launch, top-centered island with an animated mask expanding from physical notch bounds, notchless fallback, built-in/active/selected display choice, preserved drafts, menu-bar recovery and scoped Command-Shift-Enter registration. Reduced motion skips the spring. Categorized navigation and appearance settings live in the top-left dropdown. Existing pet, organization, games, settings and capture share the original controller.
 - `InferenceProvider` isolates app code from runtime-specific requests. `OllamaProvider` uses loopback-only ephemeral requests, rejects redirects and remote-model metadata, checks completion capability, parses bounded streaming responses, and supports cancellation, timeouts and unload.
 - `ManagedLocalProvider` launches one pinned llama.cpp process per request with bounded pipe I/O, no shell evaluation, no listening socket, a 180-second deadline, cancellation, and forced termination fallback. Its process ends after generation. Text chat uses the pinned model's ChatML format.
 - The packaged runtime includes Apple silicon and Intel binaries from llama.cpp b11236. `prepare-runtime.sh` checks release-asset SHA-256 hashes before extracting. The app remains universal; the workers require macOS 13.3. Runtime MIT and model Apache 2.0 notices are included.
@@ -33,7 +33,9 @@ Do not advertise the ordinary-user AI release as fully qualified until a clean M
 
 There is one curated managed model, not a benchmarked model catalog or arbitrary GGUF importer. Hardware checks are conservative thresholds, not measured performance promises. AI files use a separate versioned JSON store; legacy records are backed up before version adoption, future versions are rejected, and corrupt data is preserved with write operations disabled. A richer recovery UI remains work. Search is bounded filename and opt-in text search, not a persistent full-text index.
 
-Screen image understanding, one-shot screen capture, accessibility control, arbitrary shell execution, automatic messaging, general browser context, recurring/app-lifecycle automation triggers and unrestricted agent loops are deliberately not exposed. The roadmap gates those on separate scope/recovery tests. Later creature artwork and game catalog additions retain their existing boundaries in `release-scope.md`.
+Screen help now offers permission-gated one-shot capture on macOS 14+ and screenshot attachment on macOS 13+. A preview must be explicitly attached; images require an Ollama model advertising vision, while Vision OCR supplies text to the managed model. No screen capture or live vision inference was exercised against the user’s desktop during automated verification. Molting offers explicit web search in an ephemeral browser plus robots-aware, bounded public HTTPS text extraction. Sources are untrusted context and never action authorization.
+
+Accessibility control, arbitrary shell execution, automatic messaging, general browser context, recurring/app-lifecycle automation triggers and unrestricted agent loops are deliberately not exposed. The roadmap gates those on separate scope/recovery tests. Later creature artwork and game catalog additions retain their existing boundaries in `release-scope.md`.
 
 ## Sources
 

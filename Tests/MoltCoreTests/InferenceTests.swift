@@ -4,14 +4,16 @@ import XCTest
 @testable import MoltCore
 
 final class InferenceTests: XCTestCase {
-  func testIslandStaysBelowNotchOnOffsetDisplay() {
+  func testIslandAnchorsToNotchOnOffsetDisplay() {
     let screen = CGRect(x: -1512, y: 200, width: 1512, height: 982)
     let visible = CGRect(x: -1512, y: 225, width: 1512, height: 925)
     for expanded in [true, false] {
       let frame = IslandGeometry.frame(
         screen: screen, visible: visible, safeTop: 32, expanded: expanded)
-      XCTAssertTrue(visible.contains(frame))
-      XCTAssertLessThanOrEqual(frame.maxY, screen.maxY - 32)
+      XCTAssertTrue(screen.contains(frame))
+      XCTAssertEqual(frame.maxY, screen.maxY)
+      XCTAssertEqual(frame.midX, screen.midX)
+      if expanded { XCTAssertEqual(frame.height, 292) }
     }
     let small = CGRect(x: 100, y: 100, width: 600, height: 500)
     XCTAssertTrue(

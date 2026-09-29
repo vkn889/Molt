@@ -15,7 +15,7 @@ swift run Molt
 For the full desktop experience, including macOS notifications and launch at login, use the packaged app:
 
 ```sh
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer ./scripts/package.sh 0.3.0
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer ./scripts/package.sh 0.4.0
 open dist/Molt.app
 ```
 
@@ -25,10 +25,12 @@ The package script creates a universal Apple Silicon / Intel app and DMG. Set `M
 
 Name and personalize a fin-eared pixel creature. Choose palettes, markings, body proportions and earned accessories. Save outfits, decorate a tiny home, teach eight tricks, send Molt on fictional explorations, and grow into different forms. Care and interests shape evolution; unlocked skills and keepsakes never disappear through neglect. Vacation mode pauses care and excludes paused time from evolution age.
 
-Molt has a transparent floating companion, menu bar controls, and a notch-aware island. Command-Shift-Space toggles the island; Command-Shift-M is available if the default conflicts. Every existing dashboard feature lives inside the expanded island:
+Molt starts hidden. Command-Shift-Enter expands a black panel outward from the actual Mac notch; press it again or Escape to retract. A grouped dropdown at the top left opens Chat, Molting, daily tools, companion features and settings. Choose dark, light or system appearance and one of five accent colors. Menu bar controls provide shortcut recovery and an optional floating pet. Every existing dashboard feature lives inside the expanded island:
 
 - **Today:** three chosen priorities, upcoming reminders/calendar events, focus, daily review and gentle routines.
-- **Ask Molt:** local chat, supplied-text assistance, project memory, reviewed actions, file organization and workspace rituals.
+- **Ask Molt:** a personal local chatbot with conversational context and explicit screen sharing. Capture one frame on macOS 14+, review it, then share an image with an Ollama vision model or extracted text with any local text model.
+- **Molting:** explicit DuckDuckGo web search and a bounded public HTTPS page reader. Review source text before discussing it locally.
+- **AI & tools:** model setup, project memory, reviewed actions, file organization and workspace rituals.
 - **Activity:** honest system-health readings and optional app-time estimates.
 - **Molt:** needs, cooldowns, training, discovery book, three games and a bounded memory journal.
 - **Home:** decoration, wardrobe, portraits, a pixel drawing canvas and visual melody score.
@@ -90,7 +92,7 @@ Three bundled examples have distinct mechanics: classic **Molt**, slower-growing
 swift test
 python3 scripts/check-copy.py
 swift build -c release
-./scripts/package.sh 0.3.0
+./scripts/package.sh 0.4.0
 ```
 
 Tests cover migration, offline decay, DST, vacation, clock rollback, cooldown groups, duplicate/early completion, reward caps, all games, SQLite round trips, unsafe packs and tracking exclusions. The eight-hour test simulates ticks; it is not a real-time performance certification. See [architecture](docs/architecture.md), [verification](docs/verification.md), and [contributing](CONTRIBUTING.md).
@@ -105,7 +107,7 @@ Packaged managed AI uses a pinned llama.cpp worker over pipes, with no listening
 
 ```sh
 ./scripts/prepare-runtime.sh
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer ./scripts/package.sh 0.3.0
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer ./scripts/package.sh 0.4.0
 ```
 
 In Ask Molt, choose **Managed local**, download the compact Qwen2.5 0.5B Q4_K_M model, then connect and send a request. The download is 491 MB, SHA-256 verified, and licensed under Apache 2.0. It is a compact starting model with limited reasoning quality. Generation has a 180-second deadline and a token cap. The worker exits after each response, releasing its model memory. Interrupted downloads can resume when the server supports it. Removing weights preserves all companion and organization data.

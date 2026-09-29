@@ -9,7 +9,7 @@ This release implements the roadmap’s connected offline foundation: identity a
 - Cosmetic choices currently include four palettes, plain/freckled markings, three body proportions, supported accessories and outfit presets. Independent eye, fin, and tail sprite variants are not yet drawn.
 - The first three launch games are implemented. The document’s later game ideas (block stacking, adventure, word puzzles, daily puzzles) are future catalog additions.
 - Creative tools include a local pixel canvas, a visual melody score, portraits and decorative keepsakes. Audio synthesis and a full scrapbook editor are future additions.
-- Quick capture uses explicit structured dates. It does not guess natural-language deadlines. The island has a registered global Command-Shift-Space shortcut with a Command-Shift-M alternative; no general keyboard listener is installed.
+- Quick capture uses explicit structured dates. It does not guess natural-language deadlines. The island has a registered global Command-Shift-Enter shortcut with menu bar recovery; no general keyboard listener is installed.
 - Tasks are built-in first. Calendar is read-only. Reminder notifications are scheduled in a bounded queue (up to 60 upcoming occurrences, up to 16 per recurring reminder) refreshed on edits and app launch. Delivery depends on macOS. Reopen Molt to replenish very long unattended recurrence schedules.
 - App awareness records only public frontmost-app/session events and bounded intervals. It cannot prove productivity, detect all idle time, or reliably detect private browsing. Categories are user controlled, not inferred.
 - Imported packs contain JSON and a bounded PNG atlas, never executable content. The editor offers name/decay forms plus JSON and a one-hour simulation preview.

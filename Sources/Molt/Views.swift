@@ -48,41 +48,28 @@ struct CompanionView: View {
         }.padding(22).frame(width: 205).background(Color(red: 0.88, green: 0.92, blue: 0.85))
       }
       VStack(spacing: 0) {
-        if compact {
-          ScrollView(.horizontal, showsIndicators: false) {
-            HStack {
-              ForEach(
-                [
-                  "Today", "Ask Molt", "Activity", "Molt", "Home", "Library", "Play", "Capture",
-                  "Settings",
-                ], id: \.self
-              ) { name in
-                Button(name) { controller.tab = name }.buttonStyle(.bordered).tint(
-                  controller.tab == name ? .green : .gray)
-              }
-            }.padding(10)
-          }
+        if !compact {
+          HStack {
+            VStack(alignment: .leading, spacing: 4) {
+              Text(
+                controller.tab == "Today"
+                  ? "A little room for today."
+                  : controller.tab == "Molt" ? "Meet \(controller.petName)." : controller.tab
+              ).font(MoltTheme.display(28))
+              Text(
+                controller.tab == "Today"
+                  ? Date().formatted(date: .complete, time: .omitted) : "Your companion. Your pace."
+              ).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button {
+              controller.onCapture?()
+            } label: {
+              Label("Quick capture", systemImage: "plus")
+            }.keyboardShortcut("k", modifiers: [.command, .shift])
+          }.padding(26)
+          Divider()
         }
-        HStack {
-          VStack(alignment: .leading, spacing: 4) {
-            Text(
-              controller.tab == "Today"
-                ? "A little room for today."
-                : controller.tab == "Molt" ? "Meet \(controller.petName)." : controller.tab
-            ).font(MoltTheme.display(28))
-            Text(
-              controller.tab == "Today"
-                ? Date().formatted(date: .complete, time: .omitted) : "Your companion. Your pace."
-            ).font(.caption).foregroundStyle(.secondary)
-          }
-          Spacer()
-          Button {
-            controller.onCapture?()
-          } label: {
-            Label("Quick capture", systemImage: "plus")
-          }.keyboardShortcut("k", modifiers: [.command, .shift])
-        }.padding(26)
-        Divider()
         ScrollView {
           VStack(alignment: .leading, spacing: 18) {
             if !controller.companion.adoptionComplete { AdoptionView(controller: controller) }
@@ -100,7 +87,14 @@ struct CompanionView: View {
                 .font(.caption).foregroundStyle(.secondary)
             }
             switch controller.tab {
-            case "Ask Molt": AssistantView(assistant: controller.assistant, controller: controller)
+            case "Notch": NotchQuickView(controller: controller)
+            case "Ask Molt":
+              PersonalChatView(
+                assistant: controller.assistant, onSetup: { controller.tab = "AI & tools" })
+            case "Molting":
+              MoltingView(assistant: controller.assistant, onChat: { controller.tab = "Ask Molt" })
+            case "AI & tools":
+              AssistantView(assistant: controller.assistant, controller: controller)
             case "Play": GameView(controller: controller)
             case "Capture": QuickCaptureView(controller: controller)
             case "Today": TodayView(controller: controller)
@@ -111,13 +105,13 @@ struct CompanionView: View {
             case "Library": LibraryView(controller: controller)
             default: SettingsView(controller: controller, contexts: controller.contexts)
             }
-          }.padding(26)
+          }.padding(compact ? 16 : 26)
         }
       }
     }.frame(minWidth: compact ? 0 : 930, minHeight: compact ? 0 : 720).background(MoltTheme.paper)
       .foregroundStyle(
         MoltTheme.ink
-      ).preferredColorScheme(.light)
+      )
   }
 }
 struct AdoptionView: View {

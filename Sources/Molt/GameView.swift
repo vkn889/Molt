@@ -49,7 +49,7 @@ struct GameView: View {
                 Image(systemName: faceUp ? symbols[game.memory.cards[index]] : "questionmark").font(
                   .title
                 ).frame(maxWidth: .infinity, minHeight: 70).background(
-                  faceUp ? MoltTheme.green.opacity(0.18) : .white,
+                  faceUp ? MoltTheme.green.opacity(0.18) : Color.primary.opacity(0.08),
                   in: RoundedRectangle(cornerRadius: 10))
               }.buttonStyle(.plain).accessibilityLabel(
                 faceUp ? symbols[game.memory.cards[index]] : "Hidden card \(index + 1)")
@@ -66,7 +66,7 @@ struct GameView: View {
                     ? "star.fill"
                     : game.fetch.obstacles.contains(cell) ? "mountain.2.fill" : "circle.dotted"
               ).font(.title2).frame(maxWidth: .infinity, minHeight: 42).background(
-                .white, in: RoundedRectangle(cornerRadius: 6))
+                Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
             }
           }
           directionButtons { direction in mutate { $0.fetch.move(direction) } }

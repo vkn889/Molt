@@ -310,6 +310,22 @@ struct QuickCaptureView: View {
 @main struct MoltApplication {
   @MainActor static func main() {
     let app = NSApplication.shared
+    if CommandLine.arguments.contains("--verify-model-install") {
+      let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+        "molt-install-check-\(UUID())")
+      let manager = ModelManager(directory: root)
+      Task {
+        defer { try? FileManager.default.removeItem(at: root) }
+        manager.install()
+        while manager.busy { try? await Task.sleep(nanoseconds: 250_000_000) }
+        let ready = manager.ready
+        print("Fresh model installation: \(manager.message)")
+        try? FileManager.default.removeItem(at: root)
+        exit(ready ? 0 : 1)
+      }
+      app.run()
+      return
+    }
     if let index = CommandLine.arguments.firstIndex(of: "--verify-local-ai"),
       CommandLine.arguments.count > index + 1
     {

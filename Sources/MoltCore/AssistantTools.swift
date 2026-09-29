@@ -62,8 +62,35 @@ public struct AssistantWorkspace: Codable {
       jobs[index].detail =
         "Interrupted. Check the result before creating a new request. This action will not replay."
     }
-    jobs = Array(jobs.suffix(100))
+    trimHistory()
   }
+  public mutating func enqueue(_ proposals: [ToolProposal]) throws {
+    for proposal in proposals { try proposal.validate() }
+    let pending = jobs.filter { $0.status == "awaiting review" || $0.status == "running" }
+    guard pending.count + proposals.count <= 100 else {
+      throw MoltError.invalid(
+        "Review or cancel pending actions before adding more. The limit is 100.")
+    }
+    guard Set(proposals.map(\.id)).count == proposals.count,
+      !proposals.contains(where: { proposal in jobs.contains { $0.id == proposal.id } })
+    else { throw MoltError.invalid("This action is already recorded.") }
+    jobs.append(contentsOf: proposals.map(AssistantJob.init))
+    trimHistory()
+  }
+  public mutating func trimHistory(now: Date = Date()) {
+    let pending = jobs.filter { $0.status == "awaiting review" || $0.status == "running" }
+    let cutoff = now.addingTimeInterval(-30 * 86400)
+    let recent = jobs.filter {
+      $0.status != "awaiting review" && $0.status != "running" && $0.created >= cutoff
+    }.suffix(100)
+    jobs = (pending + recent).sorted { $0.created < $1.created }
+  }
+
+}
+public struct FileSearchHit: Identifiable, Sendable {
+  public var id: String { url.path }
+  public var url: URL
+  public var excerpt: String?
 }
 public enum ApprovedFiles {
   public static func contains(_ file: URL, in folder: URL) -> Bool {
@@ -89,27 +116,58 @@ public enum ApprovedFiles {
     return text
   }
   public static func search(_ query: String, folder: URL) -> [URL] {
-    guard folder.resolvingSymlinksInPath().path == folder.standardizedFileURL.path, !query.isEmpty,
+    searchHits(query, folder: folder, includeContents: false).map(\.url)
+  }
+  public static func searchHits(_ query: String, folder: URL, includeContents: Bool)
+    -> [FileSearchHit]
+  {
+    guard folder.resolvingSymlinksInPath().path == folder.standardizedFileURL.path,
+      !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
       let files = FileManager.default.enumerator(
-        at: folder, includingPropertiesForKeys: [.isRegularFileKey],
+        at: folder,
+        includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
         options: [.skipsHiddenFiles, .skipsPackageDescendants])
     else { return [] }
-    var results: [URL] = []
+    var results: [FileSearchHit] = []
     var visited = 0
+    var scannedBytes = 0
     for case let file as URL in files {
       visited += 1
-      if visited > 2000 || results.count >= 40 { break }
+      if visited > 2000 || results.count >= 40 || Task.isCancelled { break }
       if ["node_modules", "build", "dist", "vendor"].contains(file.lastPathComponent) {
         files.skipDescendants()
         continue
       }
       guard contains(file, in: folder),
-        (try? file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
+        let values = try? file.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
+        values.isRegularFile == true
       else { continue }
-      if file.lastPathComponent.localizedCaseInsensitiveContains(query) { results.append(file) }
+      if file.lastPathComponent.localizedCaseInsensitiveContains(query) {
+        results.append(FileSearchHit(url: file, excerpt: nil))
+        continue
+      }
+      guard includeContents, let size = values.fileSize, size <= 64_000,
+        scannedBytes + size <= 2_000_000
+      else { continue }
+      // Account attempted reads as well as matches, keeping each search bounded.
+      scannedBytes += size
+      guard let contents = try? text(at: file),
+        let match = contents.range(of: query, options: [.caseInsensitive, .diacriticInsensitive])
+      else { continue }
+      let start =
+        contents.index(match.lowerBound, offsetBy: -60, limitedBy: contents.startIndex)
+        ?? contents.startIndex
+      let end =
+        contents.index(match.upperBound, offsetBy: 100, limitedBy: contents.endIndex)
+        ?? contents.endIndex
+      results.append(
+        FileSearchHit(
+          url: file,
+          excerpt: String(contents[start..<end]).replacingOccurrences(of: "\n", with: " ")))
     }
     return results
   }
+
 }
 
 public struct WorkspaceRitual: Codable, Identifiable {

@@ -8,6 +8,9 @@ import SwiftUI
   @Published var message =
     "Optional compact model: 491 MB download, Apache 2.0. Limited reasoning quality."
   @Published var installed = false
+  @Published var ready = false
+  private var readiness: Task<Void, Never>?
+  private var setupCanceled = false
   let modelURL: URL
   let executable: URL
   private var session: URLSession?
@@ -51,6 +54,8 @@ import SwiftUI
           "The compact model needs at least 4 GB RAM and 1.5 GB available storage during installation."
         return
       }
+      setupCanceled = false
+      ready = false
       busy = true
       progress = 0
       message = "Downloading the pinned compact model. Cancel is available."
@@ -66,12 +71,50 @@ import SwiftUI
       download?.resume()
     } catch { message = error.localizedDescription }
   }
-  func cancel() { download?.cancel() }
+  func cancel() {
+    setupCanceled = true
+    download?.cancel()
+    readiness?.cancel()
+  }
+  func checkReadiness() {
+    guard installed, runtimeAvailable, !busy else { return }
+    busy = true
+    ready = false
+    progress = 1
+    message = "Checking the local worker with a short request. No personal data is used."
+    readiness = Task {
+      defer {
+        readiness = nil
+        finish()
+      }
+      do {
+        var output = ""
+        for try await chunk in provider.stream(
+          model: ManagedModel.id, messages: [.init(role: "user", content: "Say ready in one word.")]
+        ) {
+          try Task.checkCancellation()
+          output += chunk
+        }
+        try Task.checkCancellation()
+        guard !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+          throw InferenceError.malformed
+        }
+        ready = true
+        message = "Local AI ready. The worker passed its readiness check and released model memory."
+      } catch {
+        message =
+          Task.isCancelled
+          ? "Readiness check canceled. Installed weights are preserved."
+          : "Model installed, but readiness failed: \(error.localizedDescription)"
+      }
+    }
+  }
   func uninstall() {
     guard !busy else { return }
     do {
       if installed { try FileManager.default.removeItem(at: modelURL) }
       installed = false
+      ready = false
       message = "Model removed. Pet, organization data, and memory are preserved."
     } catch { message = error.localizedDescription }
   }
@@ -96,9 +139,11 @@ import SwiftUI
       try FileManager.default.moveItem(at: location, to: staging)
       try ManagedModel.verify(staging)
       Task { @MainActor in
-        defer {
-          try? FileManager.default.removeItem(at: staging)
+        defer { try? FileManager.default.removeItem(at: staging) }
+        guard !self.setupCanceled else {
+          self.message = "Setup canceled. Previous model preserved."
           self.finish()
+          return
         }
         do {
           if FileManager.default.fileExists(atPath: self.modelURL.path) {
@@ -108,9 +153,12 @@ import SwiftUI
           }
           try? FileManager.default.removeItem(at: self.modelURL.appendingPathExtension("resume"))
           self.installed = true
-          self.message =
-            "Model verified and installed. Choose Managed local and connect to run a readiness request."
-        } catch { self.message = error.localizedDescription }
+          self.finish()
+          self.checkReadiness()
+        } catch {
+          self.message = error.localizedDescription
+          self.finish()
+        }
       }
     } catch {
       try? FileManager.default.removeItem(at: staging)

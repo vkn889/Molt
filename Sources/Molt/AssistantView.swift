@@ -108,6 +108,10 @@ struct AssistantView: View {
           }
         }
       }
+      Text(
+        "Completed action history is limited to 100 records and 30 days. Pending reviews remain until handled. Forgetting history also removes its undo records."
+      ).font(.caption)
+      Button("Forget finished action history", action: assistant.forgetFinishedJobs)
       ForEach(assistant.workspace.jobs.reversed()) { job in
         MoltCard(title: "\(job.proposal.tool.rawValue) · \(job.status)") {
           Text(
@@ -209,16 +213,22 @@ struct AssistantView: View {
           }
         }
         Toggle("Include this approved memory in my next request", isOn: $assistant.shareMemory)
+        Toggle("Search text contents in this approved folder", isOn: $assistant.searchContents)
         HStack {
-          TextField("Find filenames in selected folder", text: $assistant.searchQuery).onSubmit(
+          TextField("Find in selected folder", text: $assistant.searchQuery).onSubmit(
             assistant.search)
           Button("Search", action: assistant.search)
         }
         Text(
-          "Search visits at most 2,000 entries and returns 40 matches. Hidden files and dependency folders are excluded. Contents are read only when attached."
+          "Search visits at most 2,000 entries and returns 40 matches. Content search reads at most 2 MB of text, with a 64 KB per-file limit. Hidden files and dependency folders are excluded. Nothing enters AI context until attached."
         ).font(.caption)
-        ForEach(assistant.searchResults, id: \.path) { file in
-          Button(file.path) { assistant.attach(file) }.font(.caption).lineLimit(2)
+        ForEach(assistant.searchResults) { hit in
+          VStack(alignment: .leading) {
+            Button(hit.url.path) { assistant.attach(hit.url) }.font(.caption).lineLimit(2)
+            if let excerpt = hit.excerpt {
+              Text(excerpt).font(.caption).foregroundStyle(.secondary).lineLimit(3)
+            }
+          }
         }
       }
     }
@@ -233,7 +243,7 @@ struct ManagedModelView: View {
       Text(manager.message).font(.caption)
       if manager.busy {
         ProgressView(value: manager.progress)
-        Button("Cancel download", action: manager.cancel)
+        Button("Cancel setup", action: manager.cancel)
       } else {
         HStack {
           Button(
@@ -242,6 +252,7 @@ struct ManagedModelView: View {
           )
           .disabled(!manager.runtimeAvailable || inferenceRunning)
           if manager.installed {
+            Button("Check readiness", action: manager.checkReadiness).disabled(inferenceRunning)
             Button("Remove model", action: manager.uninstall).disabled(inferenceRunning)
           }
           Link(

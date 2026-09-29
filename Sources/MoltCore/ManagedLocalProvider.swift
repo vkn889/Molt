@@ -84,6 +84,11 @@ public final class ManagedLocalProvider: InferenceProvider, @unchecked Sendable 
         }
         do {
           guard model == ManagedModel.id else { throw InferenceError.unsupported }
+          guard !messages.contains(where: { !($0.images ?? []).isEmpty }) else {
+            throw InferenceError.server(
+              "The compact managed model cannot see images. Choose a local Ollama vision model or share the screen's extracted text."
+            )
+          }
           // Revalidate integrity before launch, including imported or externally edited files.
           try ManagedModel.verify(self.modelURL)
           let prompt =

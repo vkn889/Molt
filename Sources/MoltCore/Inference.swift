@@ -3,9 +3,11 @@ import Foundation
 public struct InferenceMessage: Codable, Sendable, Equatable {
   public var role: String
   public var content: String
-  public init(role: String, content: String) {
+  public var images: [String]?
+  public init(role: String, content: String, images: [String]? = nil) {
     self.role = role
     self.content = content
+    self.images = images
   }
 }
 public struct LocalModel: Identifiable, Sendable, Equatable {
@@ -85,7 +87,8 @@ public final class OllamaProvider: InferenceProvider, @unchecked Sendable {
       throw InferenceError.unavailable
     }
   }
-  public static func validateMetadata(_ data: Data, name: String) throws {
+  public static func validateMetadata(_ data: Data, name: String, needsVision: Bool = false) throws
+  {
     guard !name.lowercased().contains("cloud"),
       let metadata = try JSONSerialization.jsonObject(with: data) as? [String: Any]
     else {
@@ -99,6 +102,10 @@ public final class OllamaProvider: InferenceProvider, @unchecked Sendable {
     else {
       throw InferenceError.unsupported
     }
+    if needsVision && !capabilities.contains("vision") {
+      throw InferenceError.server(
+        "Choose an installed local vision model for screen images. The image was not sent.")
+    }
   }
   public func stream(model: String, messages: [InferenceMessage]) -> AsyncThrowingStream<
     String, Error
@@ -107,7 +114,9 @@ public final class OllamaProvider: InferenceProvider, @unchecked Sendable {
       let task = Task {
         do {
           let body = try JSONSerialization.data(withJSONObject: ["model": model])
-          try Self.validateMetadata(await data("show", body: body), name: model)
+          try Self.validateMetadata(
+            await data("show", body: body), name: model,
+            needsVision: messages.contains { !($0.images ?? []).isEmpty })
           struct Chat: Encodable {
             var model: String
             var messages: [InferenceMessage]

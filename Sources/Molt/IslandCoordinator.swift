@@ -162,6 +162,7 @@ struct IslandView: View {
         Menu {
           Button("Chat with Molt") { controller.tab = "Ask Molt" }
           Button("Molting: search & explore") { controller.tab = "Molting" }
+          Button("Task mode, memory & history") { controller.tab = "Agent" }
           Divider()
           Menu("Daily tools") {
             Button("Quick controls") { controller.tab = "Notch" }

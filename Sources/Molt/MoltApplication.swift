@@ -380,7 +380,7 @@ struct QuickCaptureView: View {
     controller.tab = CommandLine.arguments.last == "--pet" ? "Molt" : "Today"
     let islandPreview = CommandLine.arguments.contains("--island")
     if islandPreview {
-      controller.tab = CommandLine.arguments.contains("--chat") ? "Ask Molt" : "Notch"
+      controller.tab = CommandLine.arguments.contains("--agent") ? "Agent" : (CommandLine.arguments.contains("--chat") ? "Ask Molt" : "Notch")
     }
     let coordinator = IslandCoordinator(controller: controller, preview: true)
     let rootView =

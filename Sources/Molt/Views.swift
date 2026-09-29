@@ -93,6 +93,7 @@ struct CompanionView: View {
                 assistant: controller.assistant, onSetup: { controller.tab = "AI & tools" })
             case "Molting":
               MoltingView(assistant: controller.assistant, onChat: { controller.tab = "Ask Molt" })
+            case "Agent": AgentView(controller: controller, assistant: controller.assistant)
             case "AI & tools":
               AssistantView(assistant: controller.assistant, controller: controller)
             case "Play": GameView(controller: controller)

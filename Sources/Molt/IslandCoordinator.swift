@@ -35,7 +35,7 @@ import SwiftUI
       { _, _, pointer in
         guard let pointer else { return OSStatus(eventNotHandledErr) }
         let coordinator = Unmanaged<IslandCoordinator>.fromOpaque(pointer).takeUnretainedValue()
-        Task { @MainActor in coordinator.toggle() }
+        Task { @MainActor in coordinator.toggleFromShortcut() }
         return noErr
       }, 1, &type, Unmanaged.passUnretained(self).toOpaque(), &handler)
     registerShortcut()
@@ -63,6 +63,14 @@ import SwiftUI
       : "Shortcut unavailable (\(result)). Choose the alternative or use the menu bar."
   }
   func toggle() { expanded ? collapse() : open() }
+  func toggleFromShortcut() {
+    if expanded {
+      collapse()
+    } else {
+      controller.tab = "Ask Molt"
+      open()
+    }
+  }
   func open() {
     if !expanded { previousApp = NSWorkspace.shared.frontmostApplication }
     expanded = true

@@ -409,6 +409,9 @@ import SwiftUI
     }
   }
   func checkRituals(at now: Date) {
+    let previous = workspace
+    workspace.trimHistory(now: now)
+    if workspace.jobs.count != previous.jobs.count, !save() { workspace = previous }
     guard workspace.ritualsPaused != true, storageError == nil else { return }
     let due = (workspace.rituals ?? []).filter {
       $0.enabled && ($0.scheduled.map { $0 <= now } ?? false)

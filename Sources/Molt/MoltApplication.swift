@@ -47,7 +47,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
       panel.setFrameAutosaveName("MoltPetPosition")
       petWindow = panel
       recoverPosition()
-      panel.orderFrontRegardless()
+      controller.petVisible = false
       status = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
       status?.button?.image = NSImage(
         systemSymbolName: "leaf", accessibilityDescription: "Molt companion")
@@ -379,15 +379,24 @@ struct QuickCaptureView: View {
     controller.organization.tasks[1].today = true
     controller.tab = CommandLine.arguments.last == "--pet" ? "Molt" : "Today"
     let islandPreview = CommandLine.arguments.contains("--island")
-    if islandPreview { controller.tab = "Ask Molt" }
-    let view = NSHostingView(
-      rootView: CompanionView(controller: controller, compact: islandPreview))
+    if islandPreview {
+      controller.tab = CommandLine.arguments.contains("--chat") ? "Ask Molt" : "Notch"
+    }
+    let coordinator = IslandCoordinator(controller: controller, preview: true)
+    let rootView =
+      islandPreview
+      ? AnyView(
+        IslandView(
+          controller: controller, coordinator: coordinator,
+          previewTheme: CommandLine.arguments.contains("--light") ? "light" : "dark"))
+      : AnyView(CompanionView(controller: controller))
+    let view = NSHostingView(rootView: rootView)
+    let frame = NSRect(
+      x: 0, y: 0, width: islandPreview ? 740 : 1030, height: islandPreview ? 292 : 780)
     let window = NSWindow(
-      contentRect: NSRect(x: 0, y: 0, width: islandPreview ? 760 : 1030, height: 780),
-      styleMask: [.borderless],
-      backing: .buffered, defer: false)
+      contentRect: frame, styleMask: [.borderless], backing: .buffered, defer: false)
     window.contentView = view
-    view.frame = NSRect(x: 0, y: 0, width: islandPreview ? 760 : 1030, height: 780)
+    view.frame = frame
     view.layoutSubtreeIfNeeded()
     guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
       throw MoltError.invalid("Could not allocate preview bitmap.")

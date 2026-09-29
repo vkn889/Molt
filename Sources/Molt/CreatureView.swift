@@ -3,9 +3,22 @@ import MoltCore
 import SwiftUI
 
 struct MoltTheme {
-  static let ink = Color(red: 0.13, green: 0.22, blue: 0.20)
-  static let green = Color(red: 0.26, green: 0.42, blue: 0.32)
-  static let paper = Color(red: 0.97, green: 0.97, blue: 0.93)
+  static let ink = Color.primary
+  static let green = Color.accentColor
+  static let paper = Color(
+    nsColor: NSColor(name: nil) { appearance in
+      appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        ? .black : NSColor(white: 0.98, alpha: 1)
+    })
+  static func accent(_ name: String) -> Color {
+    switch name {
+    case "violet": return .purple
+    case "blue": return .blue
+    case "amber": return .orange
+    case "rose": return .pink
+    default: return .mint
+    }
+  }
   static func display(_ size: CGFloat) -> Font { .custom("Oxanium", size: size).weight(.semibold) }
   static func registerFont() {
     if let url = resource("Fonts/Oxanium", extension: "ttf") {
@@ -181,7 +194,7 @@ struct MoltCard<Content: View>: View {
       if !title.isEmpty { Text(title).font(MoltTheme.display(18)) }
       content
     }.padding(20).frame(maxWidth: .infinity, alignment: .leading).background(
-      .white.opacity(0.8), in: RoundedRectangle(cornerRadius: 18)
+      Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 18)
     ).overlay(RoundedRectangle(cornerRadius: 18).stroke(MoltTheme.green.opacity(0.10)))
   }
 }

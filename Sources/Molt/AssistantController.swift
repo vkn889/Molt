@@ -17,7 +17,9 @@ import SwiftUI
   @Published var projectID: UUID?
   @Published var shareMemory = false
   @Published var searchQuery = ""
-  @Published var searchResults: [URL] = []
+  @Published var searchResults: [FileSearchHit] = []
+  @Published var searchContents = false
+  private var searchID = UUID()
   @Published var storageError: String?
   let fileOrganizer: FileOrganizer
   let modelManager: ModelManager
@@ -171,9 +173,9 @@ import SwiftUI
         let proposal = ToolProposal(
           tool: planned.tool, text: planned.text, minutes: planned.minutes)
         try proposal.validate()
-        workspace.jobs.append(AssistantJob(proposal))
-        _ = save()
-        status = "Proposal ready below. Check every field before approving."
+        if enqueue([proposal]) {
+          status = "Proposal ready below. Check every field before approving."
+        }
       } catch {
         if requestID == id {
           status =
@@ -238,19 +240,33 @@ import SwiftUI
     let query = searchQuery
     let folder = URL(fileURLWithPath: project.folder)
     let expected = project.id
+    let request = UUID()
+    searchID = request
+    let contents = searchContents
     Task {
-      let results = await Task.detached { ApprovedFiles.search(query, folder: folder) }.value
-      if projectID == expected { searchResults = results }
+      let results = await Task.detached {
+        ApprovedFiles.searchHits(query, folder: folder, includeContents: contents)
+      }.value
+      if projectID == expected, searchID == request { searchResults = results }
+    }
+  }
+  @discardableResult private func enqueue(_ proposals: [ToolProposal]) -> Bool {
+    let previous = workspace
+    do {
+      try workspace.enqueue(proposals)
+      guard save() else {
+        workspace = previous
+        return false
+      }
+      return true
+    } catch {
+      workspace = previous
+      status = error.localizedDescription
+      return false
     }
   }
   func propose(_ tool: AssistantTool, text: String, minutes: Int? = nil) {
-    let proposal = ToolProposal(tool: tool, text: text, minutes: minutes)
-    do {
-      try proposal.validate()
-      workspace.jobs.append(AssistantJob(proposal))
-      if workspace.jobs.count > 100 { workspace.jobs.removeFirst(workspace.jobs.count - 100) }
-      _ = save()
-    } catch { status = error.localizedDescription }
+    _ = enqueue([ToolProposal(tool: tool, text: text, minutes: minutes)])
   }
   func execute(_ id: UUID, controller: PetController) {
     guard storageError == nil, let index = workspace.jobs.firstIndex(where: { $0.id == id }),
@@ -375,15 +391,22 @@ import SwiftUI
       _ = save()
     }
   }
-  func prepareRitual(_ ritual: WorkspaceRitual) {
-    guard workspace.ritualsPaused != true, ritual.enabled else { return }
+  private func ritualProposals(_ ritual: WorkspaceRitual) -> [ToolProposal] {
+    var proposals: [ToolProposal] = []
     if let projectID = ritual.projectID,
       workspace.projects.contains(where: { $0.id == projectID && $0.enabled })
     {
-      propose(.openWorkspace, text: projectID.uuidString)
+      proposals.append(ToolProposal(tool: .openWorkspace, text: projectID.uuidString))
     }
-    propose(.startFocus, text: ritual.name, minutes: ritual.focusMinutes)
-    status = "Ritual prepared for review. Approve its steps below."
+    proposals.append(
+      ToolProposal(tool: .startFocus, text: ritual.name, minutes: ritual.focusMinutes))
+    return proposals
+  }
+  func prepareRitual(_ ritual: WorkspaceRitual) {
+    guard workspace.ritualsPaused != true, ritual.enabled else { return }
+    if enqueue(ritualProposals(ritual)) {
+      status = "Ritual prepared for review. Approve its steps below."
+    }
   }
   func checkRituals(at now: Date) {
     guard workspace.ritualsPaused != true, storageError == nil else { return }
@@ -394,13 +417,26 @@ import SwiftUI
       guard let index = workspace.rituals?.firstIndex(where: { $0.id == ritual.id }) else {
         continue
       }
-      workspace.rituals?[index].scheduled = nil
-      guard save() else {
-        workspace.rituals?[index].scheduled = ritual.scheduled
+      let previous = workspace
+      do {
+        try workspace.enqueue(ritualProposals(ritual))
+        workspace.rituals?[index].scheduled = nil
+        guard save() else {
+          workspace = previous
+          return
+        }
+        status = "Scheduled ritual ready for review. No action has run."
+      } catch {
+        workspace = previous
+        status = error.localizedDescription
         return
       }
-      prepareRitual(ritual)
     }
+  }
+  func forgetFinishedJobs() {
+    let previous = workspace
+    workspace.jobs.removeAll { $0.status != "awaiting review" && $0.status != "running" }
+    if !save() { workspace = previous }
   }
   func handoffSummary(controller: PetController, meeting: Bool) {
     let today = Calendar.current.startOfDay(for: Date())

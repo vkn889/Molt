@@ -93,6 +93,34 @@ final class InferenceTests: XCTestCase {
     try Data("invalid".utf8).write(to: file)
     XCTAssertThrowsError(try ManagedModel.verify(file))
   }
+  func testJobQueueRejectsDuplicatesAndKeepsPendingReviews() throws {
+    var workspace = AssistantWorkspace()
+    let proposal = ToolProposal(tool: .createTask, text: "One request")
+    try workspace.enqueue([proposal])
+    XCTAssertThrowsError(try workspace.enqueue([proposal]))
+    XCTAssertEqual(workspace.jobs.count, 1)
+    for _ in 0..<120 {
+      var completed = AssistantJob(ToolProposal(tool: .saveNote, text: "Done"))
+      completed.status = "completed"
+      workspace.jobs.append(completed)
+    }
+    workspace.trimHistory()
+    XCTAssertEqual(workspace.jobs.count, 101)
+    XCTAssertTrue(workspace.jobs.contains { $0.id == proposal.id })
+    for _ in 0..<99 { try workspace.enqueue([ToolProposal(tool: .createTask, text: "Pending")]) }
+    XCTAssertThrowsError(
+      try workspace.enqueue([ToolProposal(tool: .createTask, text: "Over limit")]))
+    XCTAssertEqual(workspace.jobs.filter { $0.status == "awaiting review" }.count, 100)
+  }
+  func testInvalidBatchDoesNotPartiallyEnqueue() throws {
+    var workspace = AssistantWorkspace()
+    XCTAssertThrowsError(
+      try workspace.enqueue([
+        ToolProposal(tool: .createTask, text: "Valid"),
+        ToolProposal(tool: .startFocus, text: "Invalid duration", minutes: 1000),
+      ]))
+    XCTAssertTrue(workspace.jobs.isEmpty)
+  }
   func testOllamaIntegrationWhenExplicitlyEnabled() async throws {
     guard ProcessInfo.processInfo.environment["MOLT_TEST_OLLAMA"] == "1" else {
       throw XCTSkip("Opt-in local Ollama integration")

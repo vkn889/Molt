@@ -1,30 +1,22 @@
-import CoreText
 import MoltCore
 import SwiftUI
 
 struct MoltTheme {
   static let ink = Color.primary
   static let green = Color.accentColor
-  static let paper = Color(
-    nsColor: NSColor(name: nil) { appearance in
-      appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        ? NSColor(red: 0.09, green: 0.075, blue: 0.16, alpha: 1) : NSColor(red: 0.98, green: 0.94, blue: 0.82, alpha: 1)
-    })
+  /// The notch is always black so it reads as part of the hardware.
+  static let paper = Color.black
   static func accent(_ name: String) -> Color {
     switch name {
     case "violet": return .purple
-    case "blue": return .blue
+    case "mint": return .mint
     case "amber": return .orange
     case "rose": return .pink
-    default: return .mint
+    default: return .blue
     }
   }
-  static func display(_ size: CGFloat) -> Font { .custom("Shrikhand-Regular", size: size) }
-  static func registerFont() {
-    if let url = resource("Fonts/Shrikhand-Regular", extension: "ttf") {
-      CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
-    }
-  }
+  /// Headings use San Francisco, matching macOS.
+  static func display(_ size: CGFloat) -> Font { .system(size: size * 0.85, weight: .semibold) }
   static func resource(_ name: String, extension ext: String) -> URL? {
     if Bundle.main.bundleURL.pathExtension == "app", let root = Bundle.main.resourceURL,
       let bundle = Bundle(url: root.appendingPathComponent("Molt_Molt.bundle"))
@@ -191,10 +183,12 @@ struct MoltCard<Content: View>: View {
   @ViewBuilder var content: Content
   var body: some View {
     VStack(alignment: .leading, spacing: 14) {
-      if !title.isEmpty { Text(title).font(MoltTheme.display(18)) }
+      if !title.isEmpty {
+        Text(title).font(.system(size: 13, weight: .semibold)).foregroundStyle(.secondary)
+      }
       content
-    }.padding(20).frame(maxWidth: .infinity, alignment: .leading).background(
-      RetroSurface(radius: 18)
+    }.padding(16).frame(maxWidth: .infinity, alignment: .leading).background(
+      NotchSurface(radius: 16)
     )
   }
 }

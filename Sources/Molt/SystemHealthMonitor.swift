@@ -60,6 +60,19 @@ final class SystemHealthMonitor: SystemHealthMonitoring {
       }
       previousCPU = (busy, total)
     }
+    var vm = vm_statistics64_data_t()
+    var vmCount = mach_msg_type_number_t(
+      MemoryLayout<vm_statistics64_data_t>.size / MemoryLayout<integer_t>.size)
+    let vmResult = withUnsafeMutablePointer(to: &vm) { p in
+      p.withMemoryRebound(to: integer_t.self, capacity: Int(vmCount)) {
+        host_statistics64(mach_host_self(), HOST_VM_INFO64, $0, &vmCount)
+      }
+    }
+    let physical = Double(ProcessInfo.processInfo.physicalMemory)
+    if vmResult == KERN_SUCCESS, physical > 0 {
+      let used = Double(vm.active_count + vm.wire_count + vm.compressor_page_count) * Double(vm_kernel_page_size)
+      values["memoryUsed"] = min(1, used / physical)
+    }
     return SystemHealthSnapshot(values: values)
   }
 }

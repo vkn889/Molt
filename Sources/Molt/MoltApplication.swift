@@ -18,7 +18,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
   private var wanderOrigin: NSPoint?
   func applicationDidFinishLaunching(_ notification: Notification) {
     NSApp.setActivationPolicy(.accessory)
-    MoltTheme.registerFont()
     do {
       let root = try FileManager.default.url(
         for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true
@@ -367,7 +366,6 @@ struct QuickCaptureView: View {
   }
   @MainActor static func renderPreview(to url: URL) throws {
     NSApp.setActivationPolicy(.accessory)
-    MoltTheme.registerFont()
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(
       "molt-preview-\(UUID())")
     let controller = try PetController(directory: root)
@@ -382,17 +380,27 @@ struct QuickCaptureView: View {
     if islandPreview {
       controller.tab = CommandLine.arguments.contains("--agent") ? "Agent" : (CommandLine.arguments.contains("--chat") ? "Ask Molt" : "Notch")
     }
+    if CommandLine.arguments.contains("--hub") { controller.tab = "Hub" }
+    controller.healthEnabled = true
+    controller.refreshHealth()
+    Thread.sleep(forTimeInterval: 0.3)
+    controller.refreshHealth()
     let coordinator = IslandCoordinator(controller: controller, preview: true)
     let rootView =
       islandPreview
       ? AnyView(
-        IslandView(
-          controller: controller, coordinator: coordinator,
-          previewTheme: CommandLine.arguments.contains("--light") ? "light" : "dark"))
+        ZStack(alignment: .top) {
+          LinearGradient(
+            colors: [Color(red: 0.35, green: 0.47, blue: 0.68), Color(red: 0.62, green: 0.55, blue: 0.5)],
+            startPoint: .top, endPoint: .bottom)
+          IslandView(controller: controller, coordinator: coordinator)
+        })
       : AnyView(CompanionView(controller: controller))
     let view = NSHostingView(rootView: rootView)
+    let size = coordinator.expandedSize
     let frame = NSRect(
-      x: 0, y: 0, width: islandPreview ? 740 : 1030, height: islandPreview ? 412 : 780)
+      x: 0, y: 0, width: islandPreview ? size.width + 2 * IslandCoordinator.flare + 80 : 1030,
+      height: islandPreview ? size.height + 40 : 780)
     let window = NSWindow(
       contentRect: frame, styleMask: [.borderless], backing: .buffered, defer: false)
     window.contentView = view

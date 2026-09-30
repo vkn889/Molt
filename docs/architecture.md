@@ -30,7 +30,25 @@ Pet archives include only pet data, embedded species and optional sprite atlas. 
 
 `IslandCoordinator` owns one borderless panel pinned to the top center of the chosen display. Every page shares one size (`bodyHeight` below the menu-bar band). The header sits in the band on either side of the hardware notch, and `NotchShape` draws the black silhouette with outward flares at the top and continuous rounded corners at the bottom. The window grows before content animates open and shrinks only after it animates closed. Hovering the notch opens Home without taking focus; moving away closes it unless a control inside became key or a drag is in progress. While music plays and Molt is closed, the panel stays at notch height with artwork on the left and a level meter on the right.
 
-Pages: Home (`NotchHomeView`), Hub (`HubView`), Play (`PlayView`), Claude Code & Codex (`SessionsView`), Chat (`PersonalChatView`) and Settings (`SettingsView`).
+Pages: Home (`NotchHomeView`), Hub (`HubView`), Play (`PlayView`), Molting (`MoltingView`), Lens (`LensView`), Health (`HealthDetailView`), Claude Code & Codex (`SessionsView`), Chat (`PersonalChatView`) and Settings (`SettingsView`). Until an account exists, every page is replaced by `AccountGate`.
+
+## Hub widgets
+
+`HubLayout` (core, tested) keeps the Hub four units wide: widgets are one or two units, and every edit returns a valid layout or nothing. The layout is saved in `hub.json`. `WidgetKind.catalog` lists the widgets; `WidgetView` renders one. `QuickActions` runs Shortcuts items stored as `action:`, `app:`, `shortcut:` (Apple Shortcuts, run only if the name exists in your library) and `url:` strings. Screen recording runs `/usr/sbin/screencapture -v` and stops by writing to its input.
+
+## Lens and health
+
+`LensController` captures a region with `screencapture -i`, then runs Vision text recognition, image classification and barcode detection on the Mac, and sends only that text to the connected Ollama model. `HealthDetailController` samples `ps` every three seconds while its page is open, groups processes under their outermost app bundle with `ProcessTable` (core, tested), reads battery details from IOKit, and measures folders only when asked. Quitting uses `NSRunningApplication.terminate` on regular apps, after confirmation.
+
+## Accounts and Molting
+
+The backend is a Supabase project (schema in `supabase/migrations`). `AccountController` handles email and password sign-up and sign-in, TOTP two-factor authentication, and silent token refresh; the session lives in the keychain, so signing in is a one-time step. `RealtimeSocket` is a small Phoenix-protocol client over one WebSocket. All channels are private and authorized by row-level security on `realtime.messages`:
+
+- `lobby`: presence for "online now"; users who turn off discoverability don't track.
+- `user:<id>`: readable only by its owner; delivers new hangout invitations as database changes, filtered by the `hangouts` table's own policies.
+- `hangout:<id>`: only its host and guest, while invited or active; carries positions and emotes.
+
+Points are awarded only by the `end_hangout` database function (at least one minute, capped, one reward per pair per hour). Loans store a snapshot of Hub widgets and colors; trying one on keeps a local backup that is restored when the loan is returned, expires, or is taken back.
 
 ## Music
 

@@ -45,6 +45,14 @@ struct NotchButtonStyle: ButtonStyle {
   }
 }
 
+/// Draws the label exactly as given, dimming slightly while pressed. The system plain style can
+/// restyle some symbol colors, which would hide an action's color.
+struct BareButtonStyle: ButtonStyle {
+  func makeBody(configuration: Configuration) -> some View {
+    configuration.label.opacity(configuration.isPressed ? 0.7 : 1)
+  }
+}
+
 /// Borderless circular icon control used for media transport and header actions.
 struct NotchIconButtonStyle: ButtonStyle {
   var size: CGFloat = 28

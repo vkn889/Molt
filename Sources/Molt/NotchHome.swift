@@ -17,7 +17,10 @@ struct NotchHomeView: View {
             .transition(.opacity.combined(with: .move(edge: .trailing)))
         } else {
           WeekCard(controller: controller, contexts: controller.contexts).frame(maxWidth: .infinity, alignment: .leading)
-          MacHealthCard(controller: controller).frame(width: 150, alignment: .leading)
+          Button { controller.tab = "Health" } label: {
+            MacHealthCard(controller: controller).frame(width: 150, alignment: .leading).contentShape(Rectangle())
+          }
+          .buttonStyle(.plain).help("See what's using your Mac")
         }
       }
       .animation(.spring(response: 0.3, dampingFraction: 0.86), value: showLibrary)
@@ -288,29 +291,47 @@ struct MacHealthCard: View {
 
 // MARK: Collapsed live activity
 
-/// Shown beside the hardware notch while music plays and Molt is closed.
+/// Shown beside the hardware notch while music plays or the screen is recording and Molt is
+/// closed. Clicking it stops a recording, or opens Home.
 struct NotchLiveActivity: View {
   @ObservedObject var media: NowPlayingController
+  @ObservedObject var actions: QuickActions
   var notchWidth: CGFloat
   var height: CGFloat
   @Environment(\.moltReducedMotion) private var reduced
   var body: some View {
     HStack(spacing: 0) {
       Group {
-        if let image = media.artwork {
+        if actions.recording != nil {
+          Circle().fill(Color.red).frame(width: 10, height: 10)
+            .opacity(reduced ? 1 : 0.85)
+        } else if let image = media.artwork {
           Image(nsImage: image).resizable().aspectRatio(contentMode: .fill)
+            .frame(width: height - 14, height: height - 14)
+            .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
         } else {
           Color(white: 0.2).overlay(Image(systemName: "music.note").font(.system(size: 10)).foregroundStyle(.white.opacity(0.5)))
+            .frame(width: height - 14, height: height - 14)
+            .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
         }
       }
-      .frame(width: height - 14, height: height - 14)
-      .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
       .frame(maxWidth: .infinity)
       Color.clear.frame(width: notchWidth)
-      AudioBars(playing: media.isPlaying && !reduced).frame(width: 16, height: 12).frame(maxWidth: .infinity)
+      Group {
+        if let started = actions.recording {
+          TimelineView(.periodic(from: .now, by: 1)) { context in
+            Text(HangoutView.clock(context.date.timeIntervalSince(started)))
+              .font(.system(size: 11, weight: .semibold).monospacedDigit()).foregroundStyle(.red)
+          }
+        } else {
+          AudioBars(playing: media.isPlaying && !reduced).frame(width: 16, height: 12)
+        }
+      }
+      .frame(maxWidth: .infinity)
     }
+    .help(actions.recording != nil ? "Click to stop recording" : "Open Molt")
     .accessibilityElement()
-    .accessibilityLabel(media.track.map { "Now playing \($0.title) by \($0.artist)" } ?? "Now playing")
+    .accessibilityLabel(actions.recording != nil ? "Recording screen. Click to stop." : media.track.map { "Now playing \($0.title) by \($0.artist)" } ?? "Now playing")
   }
 }
 

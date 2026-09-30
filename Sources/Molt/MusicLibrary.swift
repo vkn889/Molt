@@ -1,7 +1,6 @@
 import AppKit
 import CryptoKit
 import Network
-import Security
 import SwiftUI
 
 struct Playlist: Identifiable, Equatable {
@@ -90,7 +89,7 @@ enum BackgroundApp {
 
   init() {
     clientID = UserDefaults.standard.string(forKey: "spotifyClientID") ?? ""
-    tokens = Keychain.read()
+    tokens = Self.keychain.read()
     connected = tokens != nil
     userName = UserDefaults.standard.string(forKey: "spotifyUser")
   }
@@ -126,7 +125,7 @@ enum BackgroundApp {
     }
   }
   func disconnect() {
-    Keychain.delete()
+    Self.keychain.delete()
     tokens = nil
     connected = false
     playlists = []
@@ -261,7 +260,7 @@ enum BackgroundApp {
       access: access, refresh: row["refresh_token"] as? String ?? refresh ?? "",
       expires: Date().addingTimeInterval(Double(row["expires_in"] as? Int ?? 3600)))
     tokens = value
-    Keychain.write(value)
+    Self.keychain.write(value)
     connected = true
     return value
   }
@@ -321,27 +320,7 @@ enum BackgroundApp {
     return String((0..<length).map { _ in characters.randomElement(using: &generator)! })
   }
 
-  /// Tokens live in the login keychain, never in preferences.
-  private enum Keychain {
-    static let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: "app.molt.spotify", kSecAttrAccount as String: "tokens"]
-    static func read() -> Tokens? {
-      var q = query
-      q[kSecReturnData as String] = true
-      var item: CFTypeRef?
-      guard SecItemCopyMatching(q as CFDictionary, &item) == errSecSuccess, let data = item as? Data else { return nil }
-      return try? JSONDecoder().decode(Tokens.self, from: data)
-    }
-    static func write(_ tokens: Tokens) {
-      guard let data = try? JSONEncoder().encode(tokens) else { return }
-      if SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary) == errSecItemNotFound {
-        var q = query
-        q[kSecValueData as String] = data
-        q[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-        SecItemAdd(q as CFDictionary, nil)
-      }
-    }
-    static func delete() { SecItemDelete(query as CFDictionary) }
-  }
+  private static let keychain = KeychainItem<Tokens>(service: "app.molt.spotify", account: "tokens")
 }
 
 private extension Data {

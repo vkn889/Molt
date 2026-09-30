@@ -65,36 +65,3 @@ import SwiftUI
     } catch { message = error.localizedDescription }
   }
 }
-struct FileOrganizerView: View {
-  @ObservedObject var organizer: FileOrganizer
-  @State private var confirmForget = false
-  var body: some View {
-    MoltCard(title: "Reviewed file organization") {
-      Text(organizer.message).font(.caption)
-      Button("Choose files and destination", action: organizer.preview)
-      if let plan = organizer.plan {
-        ForEach(plan.moves) { move in
-          VStack(alignment: .leading) {
-            Text(move.source)
-            Text("→ \(move.destination)")
-            Text(move.state).foregroundStyle(.secondary)
-          }.font(.caption).textSelection(.enabled)
-        }
-        HStack {
-          Button("Approve these moves") { organizer.execute(undo: false) }.disabled(
-            !plan.moves.allSatisfy { $0.state == "awaiting review" })
-          Button("Undo completed moves") { organizer.execute(undo: true) }.disabled(
-            !plan.moves.contains { $0.state == "completed" })
-          Button("Forget record…") { confirmForget = true }
-        }
-        Text(
-          "Interrupted operations never replay. If a row says running or undoing after restart, inspect both paths before forgetting the record."
-        ).font(.caption)
-      }
-    }.confirmationDialog(
-      "Forget the undo record? Files will stay where they are.", isPresented: $confirmForget
-    ) {
-      Button("Forget record", role: .destructive, action: organizer.forget)
-    }
-  }
-}

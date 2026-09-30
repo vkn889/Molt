@@ -7,13 +7,23 @@ import SwiftUI
 struct NotchHomeView: View {
   @ObservedObject var controller: PetController
   @ObservedObject var media: NowPlayingController
+  @State private var showLibrary = CommandLine.arguments.contains("--playlists")
   var body: some View {
-    HStack(alignment: .top, spacing: 22) {
-      NowPlayingCard(media: media).frame(width: 290, alignment: .leading)
-      WeekCard(controller: controller, contexts: controller.contexts).frame(maxWidth: .infinity, alignment: .leading)
-      MacHealthCard(controller: controller).frame(width: 150, alignment: .leading)
+    VStack(spacing: 0) {
+      HStack(alignment: .top, spacing: 22) {
+        NowPlayingCard(media: media, showLibrary: $showLibrary).frame(width: 290, alignment: .leading)
+        if showLibrary {
+          PlaylistShelf(library: controller.hub.library, close: { showLibrary = false })
+            .transition(.opacity.combined(with: .move(edge: .trailing)))
+        } else {
+          WeekCard(controller: controller, contexts: controller.contexts).frame(maxWidth: .infinity, alignment: .leading)
+          MacHealthCard(controller: controller).frame(width: 150, alignment: .leading)
+        }
+      }
+      .animation(.spring(response: 0.3, dampingFraction: 0.86), value: showLibrary)
+      PetLane(controller: controller).frame(height: 40)
     }
-    .padding(.horizontal, 22).padding(.top, 10).padding(.bottom, 18)
+    .padding(.horizontal, 22).padding(.top, 8).padding(.bottom, 8)
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
   }
 }
@@ -22,12 +32,13 @@ struct NotchHomeView: View {
 
 struct NowPlayingCard: View {
   @ObservedObject var media: NowPlayingController
+  @Binding var showLibrary: Bool
   @Environment(\.moltReducedMotion) private var reduced
   var body: some View {
     HStack(alignment: .top, spacing: 14) {
       ZStack(alignment: .bottomTrailing) {
-        Button(action: media.openPlayerApp) { artwork }.buttonStyle(.plain)
-          .help(media.player.map { "Open \($0.displayName)" } ?? "Open Music")
+        Button { showLibrary.toggle() } label: { artwork }.buttonStyle(.plain)
+          .help("Your playlists")
         if let icon = media.appIcon {
           Image(nsImage: icon).resizable().interpolation(.high).frame(width: 30, height: 30)
             .shadow(color: .black.opacity(0.5), radius: 3, y: 1)
@@ -49,7 +60,7 @@ struct NowPlayingCard: View {
           Button("Open Settings", action: media.openAutomationSettings).padding(.top, 6)
         } else {
           Text("Not playing").font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
-          Text("Play something in Spotify or Apple Music.")
+          Text("Pick a playlist, or play something in Spotify or Apple Music.")
             .font(.system(size: 11)).foregroundStyle(Color.white.opacity(0.5)).lineLimit(2).padding(.top, 2)
         }
         Spacer(minLength: 6)
@@ -87,6 +98,12 @@ struct NowPlayingCard: View {
         .accessibilityLabel(media.isPlaying ? "Pause" : "Play")
       Button(action: media.next) { Image(systemName: "forward.fill").font(.system(size: 14)) }
         .accessibilityLabel("Next track").disabled(media.track == nil)
+      Spacer(minLength: 0)
+      Button { showLibrary.toggle() } label: {
+        Image(systemName: "music.note.list").font(.system(size: 13, weight: .semibold))
+      }
+      .buttonStyle(NotchIconButtonStyle(size: 28, prominent: showLibrary))
+      .help("Your playlists").accessibilityLabel(showLibrary ? "Hide playlists" : "Show playlists")
     }.buttonStyle(NotchIconButtonStyle(size: 30)).padding(.leading, -6)
   }
 }
@@ -172,7 +189,7 @@ struct WeekCard: View {
     let events = contexts.events.filter { calendar.isDate($0.startDate, inSameDayAs: today) && $0.endDate > Date() }
     let tasks = controller.organization.tasks.filter { $0.today && $0.completed == nil }
     if events.isEmpty && tasks.isEmpty {
-      Button { controller.tab = "Today" } label: {
+      Button { controller.tab = "Hub" } label: {
         HStack(spacing: 8) {
           Image(systemName: "calendar.badge.checkmark").font(.system(size: 14))
           Text("Nothing for today").font(.system(size: 12, weight: .medium))
@@ -180,7 +197,7 @@ struct WeekCard: View {
         .foregroundStyle(Color.white.opacity(0.45))
         .frame(maxWidth: .infinity, minHeight: 44)
         .contentShape(Rectangle())
-      }.buttonStyle(.plain).help("Open Today")
+      }.buttonStyle(.plain).help("Open Hub")
     } else {
       VStack(alignment: .leading, spacing: 6) {
         ForEach(Array(events.prefix(2)), id: \.eventIdentifier) { event in

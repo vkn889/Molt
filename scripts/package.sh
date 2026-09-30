@@ -1,9 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-VERSION="${1:-0.6.0}"
+VERSION="${1:-0.7.0}"
 if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$ ]]; then
-  echo 'Expected a version such as 0.6.0' >&2
+  echo 'Expected a version such as 0.7.0' >&2
   exit 1
 fi
 BUILD_ARGS=(-c release)

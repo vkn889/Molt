@@ -1,51 +1,42 @@
 # Molt
 
-A little companion. Your whole Mac, a little closer.
+A little companion that lives in your MacBook's notch.
 
-Molt is a native macOS notch companion with a clean, Apple-style interface, a pixel-art creature, and practical everyday controls. See what's playing, glance at your week and your Mac's health, arrange your hub, check the weather, settle into a focus session, and chat with a local helper.
+Molt is a native macOS notch app. Hover over the notch and it opens into a black panel that looks like part of the hardware: your music, your week, your Mac's health, and Molt, a small pixel creature that runs around when you look after it.
 
 ![Molt notch home](docs/screenshots/notch-home.png)
 
 ## Open the notch
 
-Hover over the notch, or press **Command-Shift-Enter**, and Molt expands from it. Move the pointer away (or press the shortcut again) to close it. Escape closes the menu first, then Molt. Hover-to-open can be turned off from the **•••** menu.
+Hover over the notch, or press **Command-Shift-Enter**. Move the pointer away, press the shortcut again, or press Escape to close it. Hover-to-open can be turned off in Settings.
 
-The panel is pure black and meets the top of the screen with small outward flares, like the notch itself; the lower corners are continuously rounded. Home and Hub tabs sit left of the notch; Chat, Search, Capture and the menu sit to its right. Text uses San Francisco, and reduced-motion preferences disable interface movement. The companion remains pixel art.
+Every page is the same size. Home, Hub and Play sit left of the notch; Claude Code & Codex, Chat and Settings sit to its right as icons.
 
-**Home** shows:
+## Pages
 
-- **Now playing** from Spotify or Apple Music, detected automatically: artwork, title, album, artist, a draggable progress bar and playback controls. While music plays and Molt is closed, the artwork and a level meter sit either side of the notch.
-- **Your week:** a five-day strip with today highlighted, dots on days with events, and today's events or priorities.
-- **Mac health:** battery, CPU, memory, storage and your companion's care level.
+- **Home:** now playing, a five-day calendar strip with today's events or tasks, and Mac health (battery, CPU, memory, storage, and Molt's care level). Molt scurries along the bottom, or sleeps.
+- **Hub:** four tiles. Focus timer, today's tasks, weather for your city, and your three most-used apps today with their icons.
+- **Play:** a tamagotchi. Drag a meal, snack, water, ball, nap, brush, pat or story onto Molt, or click it. Each has a short cooldown. The more you care for Molt, the livelier it gets and the more it runs around on Home.
+- **Claude Code & Codex:** your conversations from both tools, newest first, with today's and this week's token usage. Pick one to read it. Molt can keep a private copy of every chat so they survive the tools' own cleanup.
+- **Chat:** talk to Molt through Ollama on this Mac.
+- **Settings:** Molt's name and color, accent color, hover, display, launch at login, and every connection.
 
-## A companion and a control center
+![Hub](docs/screenshots/notch-hub.png)
 
-- **Companion:** care, moods, tricks, short games, outfits, colors, accessories, and home customization. Click the creature to customize its home and wardrobe.
-- **Today:** your next priority, selected calendar events, reminders, and focus controls.
-- **Music:** Home follows whichever of Spotify or Apple Music is playing. macOS asks once for Automation permission. Molt never launches a player itself. Spotify artwork is loaded from Spotify's image servers. The Hub's **Playlists & volume** card keeps system volume and favorite playlist links; autoplay depends on the service.
-- **Weather:** search for a city, choose the correct result, and fetch current modeled conditions. Powered by [Open-Meteo](https://open-meteo.com/) under CC BY 4.0. Only your search and selected coordinates go to the weather service.
-- **My Mac:** save wallpaper favorites, apply one to current desktops, and restore the prior wallpaper during the session. Change Dock position, auto-hide, and icon size. Dock controls apply immediately and restart the Dock; they do not install custom skins.
-- **Scenes:** save a combination of selected apps, a favorite playlist, wallpaper, and focus duration. Review the exact actions before running a scene. Existing focus sessions are preserved. App and playlist opening cannot guarantee playback or restore prior app state.
-- **Arrange:** show, hide, and reorder Hub cards.
+![Play](docs/screenshots/notch-play.png)
+
+## Music
+
+Home follows whichever of Spotify or Apple Music is playing, with artwork, a draggable progress bar and playback controls. While music plays and Molt is closed, the artwork and a level meter sit on either side of the notch.
+
+Click the artwork or the playlist button to browse your playlists as a row of covers. Clicking one plays it in the background; Molt starts the music app hidden, so you never have to switch to it.
+
+- **Apple Music:** choose **Connect Apple Music**. Molt reads the playlists in your library on this Mac. macOS asks once to let Molt control Music.
+- **Spotify:** Spotify only lets registered apps sign in, so there's a one-time setup. Create a free app at [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard), add `http://127.0.0.1:43821/callback` as its redirect URI, paste its Client ID into Molt, and choose **Connect**. You sign in on Spotify's own page; Molt stores the sign-in in your keychain. With Spotify connected, Home also shows and controls what's playing on your phone or another device (remote control needs Spotify Premium).
 
 ## Local helper
 
-Start with **Connect to Ollama**. Molt connects to Ollama on this Mac and automatically uses an available compatible local installation. There is no provider or model-selection interface. Inference uses loopback requests and has no cloud fallback.
-
-Use chat for everyday questions, explanations, writing help, planning, and reviewed task proposals. Explicitly shared screen images or extracted text can provide context. Capture requires macOS Screen Recording permission and macOS 14+; screenshot attachment is available on macOS 13. Image support depends on the connected service.
-
-Molting offers explicit web search and reviewed public-page reading. Memories are saved only when approved and can be edited, paused, or forgotten. Recent actions and memory controls live under Settings. Older project and creator data is preserved even where its tools are no longer prominent in navigation.
-
-## Usage and morning postcards
-
-Usage tracking is **opt-in** in the Usage card.
-
-- **Foreground app time:** local observation while Molt is running, including Codex and Claude desktop apps when they are foreground. Sleep gaps and idle time beyond two minutes are excluded conservatively. This is an estimate, not access to Apple's Screen Time database.
-- **CLI process time:** samples whether Claude Code and Codex CLI executables are running. Background time can overlap with foreground time; it is not attention or billable duration. Terminal sessions cannot always be attributed exactly.
-- **Tokens:** explicitly imports numeric records from standard `~/.claude/projects` and `~/.codex/sessions` JSONL files. Prompts are not retained or uploaded. Missing folders, oversized files, custom storage paths, and scan limits can make totals incomplete. Imports are limited to 500 files, 8 MB per file, and 64 MB per scan.
-- **Cost:** displays reported costs when present, or estimates using rates you enter per million tokens. These are approximate blended rates, not subscription charges or provider invoices. Cache creation is treated as input. Without rates or recorded cost, cost is unavailable.
-- **Morning postcard:** after 7 AM, summarizes the previous day's observed activity and available token records. Appears in the hub while Molt runs or on its next launch. No background daemon is installed. Up to 30 reports and 30 days of CLI intervals are retained.
-- **Control:** pause imports, configure foreground tracking exclusions, or forget Molt's AI usage and reports. Forgetting does not delete the tools' original session files.
+Chat uses Ollama on this Mac and has no cloud fallback. Attach a text file with the paperclip.
 
 ## Run and package
 
@@ -54,21 +45,24 @@ Requires macOS 13+, Swift 5.9+, and full Xcode for universal builds and XCTest.
 ```sh
 swift run Molt
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --scratch-path .build-xcode
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer ./scripts/package.sh 0.6.0
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer ./scripts/package.sh 0.7.0
 open dist/Molt.app
 ```
 
-The package script produces `dist/Molt-0.6.0.dmg` and an ad-hoc signed universal app. Ad-hoc signing is not Apple notarization. Set `MOLT_UNIVERSAL=0` for a host-only development build.
+The package script produces `dist/Molt-0.7.0.dmg` and an ad-hoc signed universal app. Ad-hoc signing is not Apple notarization. Set `MOLT_UNIVERSAL=0` for a host-only development build.
 
 ## Privacy and permissions
 
-No background screen capture, clipboard collection, or keystroke recording. Calendar, notifications, screen capture, app observation, and local AI usage imports have separate controls. Media automation requests macOS permission the first time Molt reads Spotify or Apple Music, and only for a player that is already running. Weather and web search contact their respective services when requested. Local chat and imported usage stay on the Mac.
+- Calendar, app usage, Mac health, and Claude Code & Codex reading are each off until you turn them on.
+- Claude Code and Codex chats are read from `~/.claude/projects` and `~/.codex/sessions`. Copies are kept in `~/Library/Application Support/Molt/Sessions`. Nothing is uploaded.
+- App usage is estimated from the frontmost app while Molt runs. It is not Apple's Screen Time.
+- Spotify tokens are kept in the macOS keychain. Spotify artwork is loaded from Spotify's image servers.
+- Weather sends only your city search and chosen coordinates to [Open-Meteo](https://open-meteo.com/) (CC BY 4.0).
+- No screen capture, clipboard collection or keystroke recording.
 
 ## Development references
 
 - [Architecture](docs/architecture.md)
 - [Companion definitions](docs/definitions.md)
 - [Release scope](docs/release-scope.md)
-- [0.6.0 release notes](docs/releases/0.6.0.md)
-
-Historical model/runtime tooling remains in the repository for compatibility and development, outside the current user interface.
+- [0.7.0 release notes](docs/releases/0.7.0.md)

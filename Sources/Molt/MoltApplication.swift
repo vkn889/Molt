@@ -5,17 +5,11 @@ import SwiftUI
 
 final class FloatingPanel: NSPanel { override var canBecomeKey: Bool { true } }
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   private var controller: PetController?
   private var island: IslandCoordinator?
-  private var petWindow: NSPanel?
-  private var detailWindow: NSWindow?
-  private var gameWindow: NSWindow?
-  private var captureWindow: NSWindow?
   private var status: NSStatusItem?
   private var lockDescriptor: Int32 = -1
-  private var lastDisplay = -1
-  private var wanderOrigin: NSPoint?
   func applicationDidFinishLaunching(_ notification: Notification) {
     NSApp.setActivationPolicy(.accessory)
     do {
@@ -23,7 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true
       ).appendingPathComponent("Molt")
       try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-      lockDescriptor = open(
+      lockDescriptor = Darwin.open(
         root.appendingPathComponent(".instance-lock").path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
       guard lockDescriptor >= 0, flock(lockDescriptor, LOCK_EX | LOCK_NB) == 0 else {
         NSApp.terminate(nil)
@@ -31,39 +25,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
       }
       let controller = try PetController()
       self.controller = controller
-      let panel = FloatingPanel(
-        contentRect: NSRect(x: 100, y: 100, width: 250, height: 280),
-        styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-      panel.isOpaque = false
-      panel.backgroundColor = .clear
-      panel.hasShadow = false
-      panel.level = .floating
-      panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-      panel.isMovableByWindowBackground = true
-      panel.hidesOnDeactivate = false
-      panel.contentView = NSHostingView(rootView: PetView(controller: controller))
-      panel.delegate = self
-      panel.setFrameAutosaveName("MoltPetPosition")
-      petWindow = panel
-      recoverPosition()
-      controller.petVisible = false
       status = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
       status?.button?.image = NSImage(
         systemSymbolName: "leaf", accessibilityDescription: "Molt companion")
-      controller.onChange = { [weak self] in
-        self?.rebuildMenu()
-        self?.applyPreferences()
-      }
-      controller.onGame = { [weak self] in self?.showGame() }
-      controller.onBringBack = { [weak self] in self?.showCompanion() }
-      controller.onCapture = { [weak self] in self?.showCapture() }
-      controller.onRecoverPet = { [weak self] in self?.bringBack() }
-      NotificationCenter.default.addObserver(
-        self, selector: #selector(recoverPosition),
-        name: NSApplication.didChangeScreenParametersNotification, object: nil)
+      controller.onChange = { [weak self] in self?.rebuildMenu() }
+      controller.onGame = { [weak self] in self?.show("Play") }
       island = IslandCoordinator(controller: controller)
       rebuildMenu()
-      applyPreferences()
     } catch { showRecovery(error) }
   }
   private func showRecovery(_ error: Error) {
@@ -91,32 +59,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
       title: "\(controller.petName) · Day \(controller.age + 1)", action: nil, keyEquivalent: "")
     title.isEnabled = false
     menu.addItem(title)
-    add("Open Molt Island…", #selector(showCompanion), to: menu, key: "o")
-    add("Quick capture…", #selector(showCapture), to: menu, key: "k")
+    add("Open Molt", #selector(openHome), to: menu, key: "o")
+    add("Play with \(controller.petName)", #selector(openPlay), to: menu)
+    add("Settings…", #selector(openSettings), to: menu, key: ",")
     menu.addItem(.separator())
-    for action in controller.definition.interactions.prefix(3) {
-      let reason = controller.blockReason(action)
-      let label =
-        reason == nil
-        ? action.name : "\(action.name) · \(controller.cooldownLabel(action, at: controller.now))"
-      let item = NSMenuItem(title: label, action: #selector(interact(_:)), keyEquivalent: "")
-      item.representedObject = action.id
-      item.target = self
-      item.isEnabled = reason == nil
-      item.toolTip = reason
-      menu.addItem(item)
-    }
-    menu.addItem(.separator())
-    add("Show / hide pet", #selector(togglePet), to: menu)
-    add("Bring Molt back", #selector(bringBack), to: menu)
-    add(
-      controller.companion.preferences.clickThrough
-        ? "Restore pet interaction" : "Enable click-through", #selector(toggleClickThrough),
-      to: menu)
     add(
       controller.organization.consent.paused ? "Resume app tracking" : "Pause app tracking",
       #selector(toggleTracking), to: menu)
-    if controller.error != nil { add("Save needs attention…", #selector(showCompanion), to: menu) }
+    if controller.error != nil { add("Save needs attention…", #selector(openHome), to: menu) }
     add("Quit Molt", #selector(quit), to: menu, key: "q")
     status?.menu = menu
   }
@@ -125,185 +75,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     item.target = self
     menu.addItem(item)
   }
-  @objc private func interact(_ sender: NSMenuItem) {
-    guard let controller,
-      let action = controller.definition.interactions.first(where: {
-        $0.id == sender.representedObject as? String
-      })
-    else { return }
-    controller.interact(action)
-  }
-  @objc func showCompanion() {
-    guard controller != nil else { return }
+  private func show(_ tab: String) {
+    controller?.tab = tab
     island?.open()
   }
-  private func showGame() {
-    controller?.tab = "Play"
-    island?.open()
-  }
-  @objc func showCapture() {
-    controller?.tab = "Capture"
-    island?.open()
-  }
-  private func window<V: View>(title: String, size: NSSize, content: V) -> NSWindow {
-    let w = NSWindow(
-      contentRect: NSRect(origin: .zero, size: size),
-      styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false
-    )
-    w.delegate = self
-    w.title = title
-    w.contentView = NSHostingView(rootView: content)
-    w.isReleasedWhenClosed = false
-    w.center()
-    return w
-  }
-  private func applyPreferences() {
-    guard let controller, let panel = petWindow else { return }
-    let prefs = controller.companion.preferences
-    panel.ignoresMouseEvents = prefs.clickThrough
-    panel.collectionBehavior =
-      prefs.fullScreen ? [.canJoinAllSpaces, .fullScreenAuxiliary] : [.canJoinAllSpaces]
-    panel.setContentSize(NSSize(width: 250 * prefs.size, height: 280 * prefs.size))
-    if prefs.movement == "hide" {
-      panel.orderOut(nil)
-      controller.petVisible = false
-    }
-    if lastDisplay != prefs.preferredDisplay {
-      lastDisplay = prefs.preferredDisplay
-      recoverPosition()
-    }
-    if prefs.movement == "bounded" && panel.isVisible && controller.companion.active == nil
-      && !prefs.reducedMotion
-    {
-      if wanderOrigin == nil { wanderOrigin = panel.frame.origin }
-      let base = wanderOrigin ?? panel.frame.origin
-      let x = min(base.x + 80, max(base.x - 80, panel.frame.minX + CGFloat.random(in: -15...15)))
-      panel.setFrameOrigin(NSPoint(x: x, y: base.y))
-      recoverPosition()
-    }
-  }
-  @objc private func togglePet() {
-    if petWindow?.isVisible == true {
-      petWindow?.orderOut(nil)
-      controller?.petVisible = false
-    } else {
-      petWindow?.orderFrontRegardless()
-      controller?.petVisible = true
-    }
-  }
-  @objc private func bringBack() {
-    controller?.changeCompanion {
-      $0.preferences.clickThrough = false
-      $0.preferences.movement = "stationary"
-    }
-    recoverPosition()
-    petWindow?.orderFrontRegardless()
-    controller?.petVisible = true
-  }
-  @objc private func toggleClickThrough() {
-    controller?.changeCompanion { $0.preferences.clickThrough.toggle() }
-  }
+  @objc private func openHome() { show("Notch") }
+  @objc private func openPlay() { show("Play") }
+  @objc private func openSettings() { show("Settings") }
   @objc private func toggleTracking() {
     controller?.updateOrganization { $0.consent.paused.toggle() }
     controller?.configureContext()
     rebuildMenu()
-  }
-  @objc private func recoverPosition() {
-    guard let panel = petWindow, !NSScreen.screens.isEmpty else { return }
-    let index = min(
-      NSScreen.screens.count - 1, max(0, controller?.companion.preferences.preferredDisplay ?? 0))
-    let bounds = NSScreen.screens[index].visibleFrame
-    let x = min(
-      max(panel.frame.minX, bounds.minX), max(bounds.minX, bounds.maxX - panel.frame.width))
-    let y = min(
-      max(panel.frame.minY, bounds.minY), max(bounds.minY, bounds.maxY - panel.frame.height))
-    panel.setFrameOrigin(NSPoint(x: x, y: y))
-  }
-  func windowDidChangeOcclusionState(_ notification: Notification) {
-    guard let window = notification.object as? NSWindow else { return }
-    if window === detailWindow {
-      controller?.dashboardVisible = window.occlusionState.contains(.visible)
-    }
-    if window === petWindow { controller?.petVisible = window.occlusionState.contains(.visible) }
-  }
-  func windowWillClose(_ notification: Notification) {
-    if let window = notification.object as? NSWindow, window === detailWindow {
-      controller?.dashboardVisible = false
-    }
-  }
-  func windowDidMove(_ notification: Notification) {
-    if NSEvent.pressedMouseButtons != 0 { wanderOrigin = petWindow?.frame.origin }
-    petWindow?.saveFrame(usingName: "MoltPetPosition")
   }
   @objc private func quit() { NSApp.terminate(nil) }
   func applicationWillTerminate(_ notification: Notification) {
     controller?.changeFocus("pause")
     controller?.tick()
     controller?.saveOrganization()
-    petWindow?.saveFrame(usingName: "MoltPetPosition")
     if lockDescriptor >= 0 { close(lockDescriptor) }
-  }
-}
-struct QuickCaptureView: View {
-  @ObservedObject var controller: PetController
-  @State private var text = ""
-  @State private var kind = "task"
-  @State private var due = Date().addingTimeInterval(3600)
-  @FocusState private var focused: Bool
-  var body: some View {
-    VStack(alignment: .leading, spacing: 18) {
-      Text("Make a little space.").font(MoltTheme.display(24))
-      Picker("Capture", selection: $kind) {
-        Text("Task").tag("task")
-        Text("Note").tag("note")
-        Text("Reminder").tag("reminder")
-        Text("Command").tag("command")
-      }.pickerStyle(.segmented)
-      TextField(
-        kind == "command" ? "today, focus, feed, journal, rest" : "What’s on your mind?",
-        text: $text
-      ).textFieldStyle(.roundedBorder).focused($focused).onSubmit(save)
-      if kind == "reminder" { DatePicker("Confirm reminder time", selection: $due) }
-      Text(
-        kind == "command"
-          ? "Explicit commands only. No other apps or files are controlled."
-          : "Saved locally. You can organize it later."
-      ).font(.caption).foregroundStyle(.secondary)
-      HStack {
-        Spacer()
-        Button("Save", action: save).keyboardShortcut(.defaultAction)
-      }
-    }.padding(25).frame(minWidth: 470, minHeight: 260).background(MoltTheme.paper).onAppear {
-      focused = true
-    }
-  }
-  func save() {
-    guard !text.trimmingCharacters(in: .whitespaces).isEmpty else { return }
-    if kind == "command" {
-      switch text.lowercased() {
-      case "focus": controller.focus(minutes: 25)
-      case "feed", "rest":
-        if let action = controller.definition.interactions.first(where: {
-          $0.id == text.lowercased()
-        }) {
-          controller.interact(action)
-        }
-      case "journal":
-        controller.tab = "Molt"
-        controller.onBringBack?()
-      case "today":
-        controller.tab = "Today"
-        controller.onBringBack?()
-      default:
-        controller.error = "Unknown command. Try today, focus, feed, journal, or rest."
-      }
-    } else if kind == "reminder" {
-      controller.updateOrganization { $0.reminders.append(Reminder(text, due: due)) }
-      controller.configureContext()
-    } else {
-      controller.capture(text, kind: kind)
-    }
-    text = ""
   }
 }
 @main struct MoltApplication {
@@ -375,32 +164,38 @@ struct QuickCaptureView: View {
     ]
     controller.organization.tasks[0].today = true
     controller.organization.tasks[1].today = true
-    controller.tab = CommandLine.arguments.last == "--pet" ? "Molt" : "Today"
-    let islandPreview = CommandLine.arguments.contains("--island")
-    if islandPreview {
-      controller.tab = CommandLine.arguments.contains("--agent") ? "Agent" : (CommandLine.arguments.contains("--chat") ? "Ask Molt" : "Notch")
+    controller.tab = "Notch"
+    if let index = CommandLine.arguments.firstIndex(of: "--mood"), CommandLine.arguments.count > index + 1 {
+      // Previews render at any hour; keep Molt awake to show the requested pose.
+      controller.changeCompanion { $0.preferences.sleepStart = 0; $0.preferences.sleepEnd = 0 }
+      controller.mood = CommandLine.arguments[index + 1]
     }
-    if CommandLine.arguments.contains("--hub") { controller.tab = "Hub" }
+    for (flag, tab) in [("--hub", "Hub"), ("--play", "Play"), ("--sessions", "Sessions"), ("--chat", "Ask Molt"), ("--settings", "Settings")]
+    where CommandLine.arguments.contains(flag) { controller.tab = tab }
     controller.healthEnabled = true
     controller.refreshHealth()
     Thread.sleep(forTimeInterval: 0.3)
     controller.refreshHealth()
+    if controller.tab == "Sessions" {
+      controller.hub.sessions.archive = false
+      controller.hub.sessions.enabled = true
+      let deadline = Date().addingTimeInterval(60)
+      repeat { RunLoop.main.run(until: Date().addingTimeInterval(0.2)) } while controller.hub.sessions.busy && Date() < deadline
+      RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+    }
     let coordinator = IslandCoordinator(controller: controller, preview: true)
     let rootView =
-      islandPreview
-      ? AnyView(
+      AnyView(
         ZStack(alignment: .top) {
           LinearGradient(
             colors: [Color(red: 0.35, green: 0.47, blue: 0.68), Color(red: 0.62, green: 0.55, blue: 0.5)],
             startPoint: .top, endPoint: .bottom)
           IslandView(controller: controller, coordinator: coordinator)
         })
-      : AnyView(CompanionView(controller: controller))
     let view = NSHostingView(rootView: rootView)
     let size = coordinator.expandedSize
     let frame = NSRect(
-      x: 0, y: 0, width: islandPreview ? size.width + 2 * IslandCoordinator.flare + 80 : 1030,
-      height: islandPreview ? size.height + 40 : 780)
+      x: 0, y: 0, width: size.width + 2 * IslandCoordinator.flare + 80, height: size.height + 40)
     let window = NSWindow(
       contentRect: frame, styleMask: [.borderless], backing: .buffered, defer: false)
     window.contentView = view

@@ -2,184 +2,225 @@ import AppKit
 import MoltCore
 import SwiftUI
 
+/// Four glanceable tiles, all the same size as Home.
 struct HubView: View {
   @ObservedObject var controller: PetController
   @ObservedObject var hub: HubController
-  @State private var playlist = ""
-  @State private var scene = HubScene(name: "Study together")
-  @State private var volume = 50.0
-  @State private var customize = false
   var body: some View {
-    VStack(alignment: .leading, spacing: 14) {
-      HStack(spacing: 12) {
-        Button { controller.tab = "Home" } label: {
-          CreatureView(appearance: controller.companion.appearance, atlasURL: controller.atlasURL, mood: controller.mood, moving: !controller.companion.preferences.reducedMotion)
-            .frame(width: 40, height: 40)
-            .background(Circle().fill(Color.white.opacity(0.06)))
-        }.buttonStyle(.plain).accessibilityLabel("Customize your companion")
-        VStack(alignment: .leading, spacing: 2) {
-          Text(controller.petName).font(.system(size: 15, weight: .semibold))
-          Text(controller.message).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
-        }
-        Spacer()
-        Button("Care") { controller.tab = "Molt" }
-        Button("Play") { controller.tab = "Play" }
-        Button(customize ? "Done" : "Arrange") { customize.toggle() }
-      }
-      if let key = hub.saved.reports.keys.sorted().last, let report = hub.saved.reports[key] {
-        DisclosureGroup("Morning postcard · " + String(key.prefix(10))) { Text(report).font(.callout).textSelection(.enabled) }
-      }
-      if customize {
-        VStack(spacing: 6) {
-          ForEach(["Today", "Music", "Weather", "Mac", "Scenes", "Usage"], id: \.self) { card in
-            HStack {
-              Toggle(card == "Music" ? "Playlists & volume" : card == "Mac" ? "My Mac" : card, isOn: Binding(get: { hub.saved.cards.contains(card) }, set: { _ in hub.toggleCard(card) }))
-                .toggleStyle(.switch).controlSize(.small)
-              Spacer()
-              Button { hub.moveCard(card, offset: -1) } label: { Image(systemName: "chevron.up") }.accessibilityLabel("Move \(card) up")
-              Button { hub.moveCard(card, offset: 1) } label: { Image(systemName: "chevron.down") }.accessibilityLabel("Move \(card) down")
-            }.buttonStyle(NotchIconButtonStyle(size: 24))
-          }
-        }.padding(12).background(NotchSurface(radius: 12))
-      }
-      ForEach(hub.saved.cards, id: \.self) { card in
-        MoltCard(title: card == "Music" ? "Playlists & volume" : card == "Mac" ? "My Mac" : card) {
-          switch card {
-          case "Today": today
-          case "Music": music
-          case "Weather": weather
-          case "Mac": mac
-          case "Scenes": scenes
-          default: UsageHubView(controller: controller, hub: hub)
-          }
-        }
-      }
-      Text(hub.status).font(.caption).textSelection(.enabled)
+    HStack(spacing: 12) {
+      FocusTile(controller: controller)
+      TasksTile(controller: controller)
+      WeatherTile(hub: hub)
+      TopAppsTile(controller: controller)
     }
-  }
-  private var today: some View {
-    VStack(alignment: .leading, spacing: 8) {
-      Text(controller.organization.tasks.first(where: { $0.today && $0.completed == nil })?.title ?? "A little room for your next good idea.")
-      ForEach(controller.contexts.events.prefix(2), id: \.eventIdentifier) { event in
-        Text("\(event.startDate.formatted(date: .omitted, time: .shortened)) · \(event.title ?? "Event")").font(.caption)
-      }
-      HStack {
-        Button("Focus 25m") { controller.focus(minutes: 25) }
-        Button("Priorities & reminders") { controller.tab = "Today" }
-      }
-    }
-  }
-  private var music: some View {
-    VStack(alignment: .leading, spacing: 10) {
-      EmptyView().onAppear { hub.readVolume { volume = Double($0) } }
-      Text("Now playing lives on Home and follows Spotify or Apple Music automatically.").font(.caption).foregroundStyle(.secondary)
-      HStack(spacing: 8) {
-        Image(systemName: "speaker.fill").foregroundStyle(.secondary)
-        Slider(value: $volume, in: 0...100) { editing in if !editing { hub.volume(Int(volume)) } }
-        Image(systemName: "speaker.wave.3.fill").foregroundStyle(.secondary)
-      }.disabled(hub.busy)
-      HStack {
-        TextField("Paste an Apple Music or Spotify playlist link", text: $playlist).textFieldStyle(.roundedBorder)
-        Button("Save") { hub.addPlaylist(playlist); playlist = "" }.disabled(playlist.isEmpty)
-      }
-      ForEach(hub.saved.playlists, id: \.self) { value in
-        HStack {
-          Image(systemName: value.contains("spotify") ? "dot.radiowaves.left.and.right" : "music.note.list").foregroundStyle(.secondary)
-          Button { hub.openPlaylist(value) } label: { Text(value).lineLimit(1).truncationMode(.middle) }.buttonStyle(.plain)
-          Spacer()
-          Button { hub.saved.playlists.removeAll { $0 == value }; hub.save() } label: { Image(systemName: "xmark") }
-            .buttonStyle(NotchIconButtonStyle(size: 22)).accessibilityLabel("Remove playlist")
-        }.font(.caption)
-      }
-    }
-  }
-  private var weather: some View {
-    VStack(alignment: .leading, spacing: 8) {
-      HStack { TextField("City", text: $hub.city); Button("Find city", action: hub.findCity).disabled(hub.busy) }
-      ForEach(hub.places) { place in
-        Button("\(place.name), \(place.country ?? "")") { hub.loadWeather(place) }.disabled(hub.busy)
-      }
-      Text(hub.weather)
-      Link("Weather by Open-Meteo · CC BY 4.0", destination: URL(string: "https://open-meteo.com/")!).font(.caption)
-      Text("Only the city search and selected coordinates are sent to Open-Meteo. No location permission is needed.").font(.caption)
-    }
-  }
-  private var mac: some View {
-    VStack(alignment: .leading, spacing: 8) {
-      HStack { Button("Add wallpaper", action: hub.chooseWallpaper); Button("Restore wallpaper", action: hub.restoreWallpaper) }
-      ForEach(hub.saved.wallpapers, id: \.self) { path in
-        HStack { Text(URL(fileURLWithPath: path).lastPathComponent).lineLimit(1); Button("Apply") { hub.applyWallpaper(path) }; Button("Remove") { hub.saved.wallpapers.removeAll { $0 == path }; hub.save() } }
-      }
-      Text("Dock position").font(.headline)
-      HStack { ForEach(["left", "bottom", "right"], id: \.self) { value in Button(value.capitalized) { hub.dock("orientation", value: value) } } }
-      HStack { Button("Auto-hide Dock") { hub.dock("autohide", value: "true") }; Button("Always show Dock") { hub.dock("autohide", value: "false") } }
-      HStack { ForEach(["36", "48", "64", "80"], id: \.self) { value in Button("\(value) px") { hub.dock("tilesize", value: value) } } }
-      Text("Dock controls apply immediately and restart the Dock. Wallpaper affects current desktops, not every Space. These controls do not install Dock skins.").font(.caption)
-    }.disabled(hub.busy)
-  }
-  private var scenes: some View {
-    VStack(alignment: .leading, spacing: 8) {
-      ForEach(hub.saved.scenes) { value in
-        HStack { Text(value.name); Button("Review scene") { hub.pendingScene = value }; Button("Remove") { hub.saved.scenes.removeAll { $0.id == value.id }; hub.save() } }
-      }
-      if let pending = hub.pendingScene {
-        Text("Review: \(pending.name)").font(.headline)
-        Text("Focus: \(pending.minutes) min\nPlaylist: \(pending.playlist.isEmpty ? "None" : pending.playlist)\nWallpaper: \(pending.wallpaper.isEmpty ? "Unchanged" : URL(fileURLWithPath: pending.wallpaper).lastPathComponent)\nApps: \(pending.apps.map { URL(fileURLWithPath: $0).lastPathComponent }.joined(separator: ", "))").font(.caption)
-        HStack { Button("Run these actions") { hub.runScene(pending, controller: controller) }; Button("Cancel") { hub.pendingScene = nil } }
-      }
-      DisclosureGroup("Create a scene") {
-        TextField("Scene name", text: $scene.name)
-        Stepper("Focus: \(scene.minutes) minutes (0 disables)", value: $scene.minutes, in: 0...180)
-        Picker("Playlist", selection: $scene.playlist) { Text("None").tag(""); ForEach(hub.saved.playlists, id: \.self) { Text($0).tag($0) } }
-        Picker("Wallpaper", selection: $scene.wallpaper) { Text("Unchanged").tag(""); ForEach(hub.saved.wallpapers, id: \.self) { Text(URL(fileURLWithPath: $0).lastPathComponent).tag($0) } }
-        Button("Choose apps") { hub.chooseApps(for: &scene) }
-        Text(scene.apps.map { URL(fileURLWithPath: $0).lastPathComponent }.joined(separator: ", ")).font(.caption)
-        Button("Save scene") { hub.saved.scenes.append(scene); hub.save(); scene = HubScene(name: "New scene") }.disabled(scene.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-      }
-    }
+    .padding(.horizontal, 22).padding(.top, 8).padding(.bottom, 14)
   }
 }
 
-struct UsageHubView: View {
-  @ObservedObject var controller: PetController
-  @ObservedObject var hub: HubController
+private struct Tile<Content: View>: View {
+  var title: String
+  var icon: String
+  @ViewBuilder var content: Content
   var body: some View {
-    VStack(alignment: .leading, spacing: 10) {
-      Toggle("Observe foreground app time", isOn: Binding(get: { controller.organization.consent.tracking }, set: { value in controller.updateOrganization { $0.consent.tracking = value }; controller.configureContext() }))
-      Text("Local estimates while Molt runs; idle time beyond two minutes and sleeping time are excluded. This is not Apple's Screen Time database.").font(.caption)
-      let start = Calendar.current.startOfDay(for: Date())
-      let totals = UsageMath.seconds(controller.organization.intervals, from: start, to: Date())
-      ForEach(totals.keys.sorted(), id: \.self) { name in Text("\(name): \(Int((totals[name] ?? 0) / 60)) min").font(.caption) }
-      Toggle("Read Claude Code / Codex usage logs and process time", isOn: Binding(get: { hub.saved.usageConsent }, set: hub.setUsageConsent))
-      Text("Reads numeric usage from ~/.claude/projects and ~/.codex/sessions. Prompts are not retained or sent anywhere. Process-running time can overlap with app time and does not measure attention.").font(.caption)
-      Button("Refresh token records") { hub.importUsage() }.disabled(!hub.saved.usageConsent || hub.importBusy)
-      Text(hub.importStatus).font(.caption)
-      let processTimes = UsageMath.seconds(hub.saved.cliIntervals, from: start, to: Date())
-      ForEach(processTimes.keys.sorted(), id: \.self) { tool in
-        Text("\(tool) today: \(Int((processTimes[tool] ?? 0) / 60)) min observed running").font(.caption)
-      }
-      ForEach(["Claude Code", "Codex"], id: \.self) { tool in
-        let records = hub.tokens.filter { $0.tool == tool && $0.date >= start }
-        Text("\(tool) today: \(records.reduce(0) { $0 + $1.input + $1.cached + $1.output }) imported tokens").font(.caption)
-      }
-      DisclosureGroup("Optional cost estimate rates, USD per million tokens") {
-        Text("Enter rates matching your usage. Cache creation is counted as input; estimates are approximate and are not your subscription bill.").font(.caption)
-        TextField("Input", value: $hub.saved.inputRate, format: .number)
-        TextField("Output", value: $hub.saved.outputRate, format: .number)
-        TextField("Cached input", value: $hub.saved.cacheRate, format: .number)
-        Button("Save rates", action: hub.save)
-      }
-      let records = hub.tokens.filter { $0.date >= start }
-      let reported = records.compactMap(\.reportedCost)
-      if !reported.isEmpty { Text("Reported cost from \(reported.count) records: " + String(format: "$%.4f", reported.reduce(0,+))).font(.caption) }
-      Text("Estimated today: \(UsageMath.estimate(records, inputRate: hub.saved.inputRate, outputRate: hub.saved.outputRate, cacheRate: hub.saved.cacheRate).map { String(format: "$%.4f", $0) } ?? "unavailable; set rates")").font(.caption)
-      Toggle("Morning report after 7 AM", isOn: Binding(get: { hub.saved.morning }, set: { hub.saved.morning = $0; hub.save() }))
-      Text("Reports appear here when Molt is running, or on the next launch after 7 AM. No background system daemon is installed.").font(.caption)
-      ForEach(hub.saved.reports.keys.sorted().reversed(), id: \.self) { key in
-        DisclosureGroup(String(key.prefix(10))) { Text(hub.saved.reports[key] ?? "").font(.caption).textSelection(.enabled) }
-      }
-      Button("Forget Molt AI usage & reports", action: hub.forgetUsage)
-      Button("Tracking exclusions & app history") { controller.tab = "Activity" }
+    VStack(alignment: .leading, spacing: 8) {
+      Label(title, systemImage: icon).font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+      content
     }
+    .padding(12)
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    .background(NotchSurface(radius: 16))
+  }
+}
+
+private struct FocusTile: View {
+  @ObservedObject var controller: PetController
+  @State private var minutes = 25
+  var body: some View {
+    Tile(title: "Focus", icon: "timer") {
+      if let session = controller.organization.sessions.first(where: { $0.finished == nil }) {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+          let elapsed = session.duration(at: context.date)
+          let remaining = session.target > 0 ? max(0, session.target - elapsed) : elapsed
+          Text(Self.clock(remaining)).font(.system(size: 30, weight: .semibold).monospacedDigit())
+            .foregroundStyle(.white)
+          Text(session.lastResumed == nil ? "Paused" : session.target > 0 ? "remaining" : "elapsed")
+            .font(.system(size: 10)).foregroundStyle(.secondary)
+        }
+        Spacer(minLength: 0)
+        HStack(spacing: 4) {
+          icon(session.lastResumed == nil ? "play.fill" : "pause.fill", session.lastResumed == nil ? "Resume" : "Pause") {
+            controller.changeFocus(session.lastResumed == nil ? "resume" : "pause")
+          }
+          icon("plus", "Add 5 minutes") { controller.changeFocus("extend") }
+          icon("stop.fill", "Stop") { controller.changeFocus("stop") }
+        }
+      } else {
+        Text(Self.clock(Double(minutes * 60))).font(.system(size: 30, weight: .semibold).monospacedDigit())
+          .foregroundStyle(Color.white.opacity(0.85))
+        HStack(spacing: 4) {
+          ForEach([15, 25, 50], id: \.self) { value in
+            Button { minutes = value } label: {
+              Text("\(value)").font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(minutes == value ? Color.white : Color.white.opacity(0.5))
+                .frame(width: 28, height: 20)
+                .background(Capsule().fill(Color.white.opacity(minutes == value ? 0.16 : 0.05)))
+            }.buttonStyle(.plain).accessibilityLabel("\(value) minutes")
+          }
+        }
+        Spacer(minLength: 0)
+        icon("play.fill", "Start focus") { controller.focus(minutes: minutes) }
+      }
+    }
+  }
+  private func icon(_ symbol: String, _ label: String, action: @escaping () -> Void) -> some View {
+    Button(action: action) { Image(systemName: symbol).font(.system(size: 12, weight: .semibold)) }
+      .buttonStyle(NotchIconButtonStyle(size: 28, prominent: true))
+      .background(Circle().fill(Color.white.opacity(0.08)))
+      .help(label).accessibilityLabel(label)
+  }
+  static func clock(_ seconds: Double) -> String {
+    let s = Int(seconds)
+    return String(format: "%02d:%02d", s / 60, s % 60)
+  }
+}
+
+private struct TasksTile: View {
+  @ObservedObject var controller: PetController
+  @State private var draft = ""
+  private var tasks: [WorkTask] {
+    let open = controller.organization.tasks.filter { $0.completed == nil }
+    return Array((open.filter(\.today) + open.filter { !$0.today }.reversed()).prefix(3))
+  }
+  var body: some View {
+    Tile(title: "Tasks", icon: "checklist") {
+      VStack(alignment: .leading, spacing: 6) {
+        ForEach(tasks) { task in
+          Button {
+            controller.updateOrganization { $0.completeTask(task.id, now: Date()) }
+          } label: {
+            HStack(spacing: 6) {
+              Image(systemName: "circle").font(.system(size: 11)).foregroundStyle(task.today ? Color.accentColor : Color.white.opacity(0.4))
+              Text(task.title).font(.system(size: 11)).lineLimit(1).foregroundStyle(Color.white.opacity(0.88))
+              Spacer(minLength: 0)
+            }.contentShape(Rectangle())
+          }.buttonStyle(.plain).help("Mark done")
+        }
+        if tasks.isEmpty {
+          Text("All clear.").font(.system(size: 11)).foregroundStyle(.secondary)
+        }
+      }
+      Spacer(minLength: 0)
+      TextField("Add a task", text: $draft).textFieldStyle(.plain).font(.system(size: 11))
+        .padding(.horizontal, 8).frame(height: 24)
+        .background(RoundedRectangle(cornerRadius: 7).fill(Color.white.opacity(0.07)))
+        .onSubmit(add)
+    }
+  }
+  private func add() {
+    let title = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !title.isEmpty else { return }
+    controller.updateOrganization { o in
+      var task = WorkTask(String(title.prefix(200)))
+      task.today = o.tasks.filter { $0.today && $0.completed == nil }.count < 3
+      o.tasks.append(task)
+    }
+    draft = ""
+  }
+}
+
+private struct WeatherTile: View {
+  @ObservedObject var hub: HubController
+  @State private var editing = false
+  var body: some View {
+    Tile(title: hub.saved.place?.name ?? "Weather", icon: "location.fill") {
+      if let weather = hub.weather, !editing {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+          Image(systemName: weather.symbol).symbolRenderingMode(.multicolor).font(.system(size: 22))
+          Text(Measurement(value: weather.temperature, unit: UnitTemperature.celsius)
+            .formatted(.measurement(width: .narrow, usage: .weather, numberFormatStyle: .number.precision(.fractionLength(0)))))
+            .font(.system(size: 30, weight: .semibold)).foregroundStyle(.white)
+        }
+        Text(weather.summary).font(.system(size: 11)).foregroundStyle(.secondary)
+        Spacer(minLength: 0)
+        HStack {
+          Link("Open-Meteo", destination: URL(string: "https://open-meteo.com/")!).font(.system(size: 9))
+            .foregroundStyle(Color.white.opacity(0.3))
+          Spacer()
+          Button { editing = true } label: { Image(systemName: "magnifyingglass").font(.system(size: 11, weight: .semibold)) }
+            .buttonStyle(NotchIconButtonStyle(size: 22)).help("Change city").accessibilityLabel("Change city")
+        }
+      } else if hub.saved.place != nil && !editing {
+        ProgressView().controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity)
+      } else {
+        TextField("Search a city", text: $hub.city).textFieldStyle(.plain).font(.system(size: 11))
+          .padding(.horizontal, 8).frame(height: 24)
+          .background(RoundedRectangle(cornerRadius: 7).fill(Color.white.opacity(0.07)))
+          .onSubmit(hub.findCity)
+        VStack(alignment: .leading, spacing: 4) {
+          ForEach(hub.places.prefix(3)) { place in
+            Button { editing = false; hub.choose(place) } label: {
+              Text([place.name, place.country].compactMap { $0 }.joined(separator: ", "))
+                .font(.system(size: 11)).lineLimit(1).foregroundStyle(Color.white.opacity(0.85))
+            }.buttonStyle(.plain)
+          }
+          if !hub.status.isEmpty { Text(hub.status).font(.system(size: 10)).foregroundStyle(.secondary) }
+        }
+      }
+    }
+    .onAppear { hub.refreshWeather() }
+  }
+}
+
+private struct TopAppsTile: View {
+  @ObservedObject var controller: PetController
+  var body: some View {
+    Tile(title: "Top apps today", icon: "chart.bar.fill") {
+      if !controller.organization.consent.tracking {
+        Text("See which apps you use most.").font(.system(size: 11)).foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+        Spacer(minLength: 0)
+        Button("Turn on") {
+          controller.updateOrganization { $0.consent.tracking = true }
+          controller.configureContext()
+        }
+      } else if top.isEmpty {
+        Text("Collecting… Check back in a few minutes.").font(.system(size: 11)).foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+      } else {
+        VStack(alignment: .leading, spacing: 8) {
+          ForEach(top, id: \.id) { app in
+            HStack(spacing: 8) {
+              if let icon = app.icon {
+                Image(nsImage: icon).resizable().frame(width: 22, height: 22)
+              } else {
+                RoundedRectangle(cornerRadius: 5).fill(Color.white.opacity(0.12)).frame(width: 22, height: 22)
+              }
+              Text(app.name).font(.system(size: 11, weight: .medium)).lineLimit(1).foregroundStyle(.white)
+              Spacer(minLength: 4)
+              Text(Self.duration(app.seconds)).font(.system(size: 10).monospacedDigit()).foregroundStyle(.secondary)
+            }
+          }
+        }
+      }
+    }
+  }
+  struct AppTime { var id: String; var name: String; var seconds: Double; var icon: NSImage? }
+  private var top: [AppTime] {
+    let start = Calendar.current.startOfDay(for: Date())
+    var totals: [String: (String, Double)] = [:]
+    for interval in controller.organization.intervals {
+      let seconds = min(interval.end, Date()).timeIntervalSince(max(interval.start, start))
+      guard seconds > 0 else { continue }
+      totals[interval.app, default: (interval.name, 0)].1 += seconds
+    }
+    return totals.sorted { $0.value.1 > $1.value.1 }.prefix(3).map { id, value in
+      AppTime(
+        id: id, name: value.0, seconds: value.1,
+        icon: NSWorkspace.shared.urlForApplication(withBundleIdentifier: id).map { NSWorkspace.shared.icon(forFile: $0.path) })
+    }
+  }
+  static func duration(_ seconds: Double) -> String {
+    let minutes = Int(seconds / 60)
+    return minutes >= 60 ? "\(minutes / 60)h \(minutes % 60)m" : "\(max(1, minutes))m"
   }
 }

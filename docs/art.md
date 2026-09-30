@@ -1,11 +1,13 @@
 # Creature artwork
 
-The user selected pixel art instead of the roadmap’s proposed low-poly direction. Molt uses one original 4-by-4 transparent sprite atlas, cropped into cached frames by the native renderer. There is no runtime image generation or art download. Oxanium is bundled locally under the SIL Open Font License, included alongside the font.
+Molt is drawn in code, not from an image. `CreatureView` paints a 14 by 11 pixel grid (plus two rows of headroom for hops) with SwiftUI `Canvas`: a wide body with softened corners, two dot eyes, stubby arms, four legs and a leaf sprout. The palette setting changes the body color (green by default, or blue, amber or violet).
 
-Asset: `Sources/Molt/Resources/Art/molt-atlas.png`.
+Poses are small edits to the same grid:
 
-Creation mode: built-in image generation. Production prompt:
+- **Idle:** occasional blink; the sprout sways.
+- **Walk:** the body bobs one pixel and alternate pairs of legs lift.
+- **Sleep:** eyes close to lines, the body settles, and a "z" drifts up.
+- **Eat:** a mouth opens and closes.
+- **Happy:** arms wave and Molt hops.
 
-> Create one transparent PNG sheet with exactly four columns and four rows of equal square cells. Each cell contains the same original small sage-green soft-bodied creature, tiny feet, large dark expressive eyes, flexible leaf-like ear fins, short curled tail, cream belly and a chunky readable silhouette. Use crisp pixel art, hard edges and a restrained palette. No text or grid lines. Consistent scale, centered poses and transparent margins. Row one: neutral front, blink, looking left, sitting. Row two: walking left, walking right, stretching, yawning. Row three: sleeping, waking, eating a berry, drinking from a cup. Row four: playing, thinking, celebrating, sweating. Keep anatomy consistent and full bodies unclipped.
-
-The runtime renderer uses discrete poses, gentle breathing and short transitions. It pauses when the associated window is hidden or occluded, respects Reduce Motion, and reduces motion when thermal pressure is elevated. Current cosmetics use supported overlay anchors. This is a sprite renderer, not a real-time 3D engine.
+On Home, Molt walks along the bottom of the panel. How far and how fast it goes depends on its care level and how often you have played with it in the last few hours. It sleeps during its sleep hours or when its energy is low. Animation stops with Reduce Motion.

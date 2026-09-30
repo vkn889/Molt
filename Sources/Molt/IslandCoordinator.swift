@@ -12,7 +12,6 @@ import SwiftUI
   @Published var notchWidth: CGFloat = 185
   @Published var hasNotch = true
   @Published var reveal: CGFloat = 0
-  @Published var menuOpen = false
   @Published private(set) var liveActivity = false
   @Published var hoverToOpen = UserDefaults.standard.object(forKey: "islandHoverOpen") as? Bool ?? true {
     didSet { UserDefaults.standard.set(hoverToOpen, forKey: "islandHoverOpen") }
@@ -30,6 +29,8 @@ import SwiftUI
   private var hoverSince: Date?
   private var outsideSince: Date?
   private var openedByHover = false
+  /// A drag in progress (for example, feeding Molt) keeps a hover-opened notch open.
+  var dragging: Bool { NSEvent.pressedMouseButtons != 0 }
   private var resize: Task<Void, Never>?
   private var subscriptions = Set<AnyCancellable>()
   init(controller: PetController, preview: Bool = false) {
@@ -79,9 +80,6 @@ import SwiftUI
     controller.$tab.removeDuplicates().dropFirst()
       .sink { [weak self] _ in Task { @MainActor [weak self] in self?.fitToContent() } }
       .store(in: &subscriptions)
-    $menuOpen.removeDuplicates().dropFirst()
-      .sink { [weak self] _ in Task { @MainActor [weak self] in self?.fitToContent() } }
-      .store(in: &subscriptions)
     reposition()
     controller.dashboardVisible = false
     panel.orderOut(nil)
@@ -95,10 +93,9 @@ import SwiftUI
 
   /// Height of the band beside the hardware notch; the header lives here.
   var headerHeight: CGFloat { hasNotch ? max(28, safeTop) : 34 }
-  var expandedSize: CGSize {
-    let home = controller.tab == "Notch" && !menuOpen
-    return CGSize(width: 720, height: headerHeight + (home ? 132 : 380))
-  }
+  /// Every page shares Home's footprint.
+  static let bodyHeight: CGFloat = 176
+  var expandedSize: CGSize { CGSize(width: 720, height: headerHeight + Self.bodyHeight) }
   var collapsedSize: CGSize {
     let wing = liveActivity ? headerHeight + 8 : 0
     return CGSize(width: notchWidth + 2 * wing, height: hasNotch ? headerHeight : 0)
@@ -167,7 +164,6 @@ import SwiftUI
   func collapse() {
     guard expanded else { return }
     expanded = false
-    menuOpen = false
     openedByHover = false
     controller.dashboardVisible = false
     controller.hub.media.active = false
@@ -249,7 +245,7 @@ import SwiftUI
       } else {
         hoverSince = nil
       }
-    } else if openedByHover, !panel.isKeyWindow, !menuOpen {
+    } else if openedByHover, !panel.isKeyWindow, !dragging {
       if panel.frame.insetBy(dx: -8, dy: -8).contains(mouse) {
         outsideSince = nil
       } else if let since = outsideSince, now.timeIntervalSince(since) > 0.3 {
@@ -300,6 +296,12 @@ struct IslandView: View {
   @Environment(\.accessibilityReduceMotion) private var systemReduced
   private var reduced: Bool { controller.companion.preferences.reducedMotion || systemReduced }
   private var motion: Animation? { reduced ? nil : .spring(response: 0.34, dampingFraction: 0.86) }
+  static let tabs: [(route: String, title: String, icon: String)] = [
+    ("Notch", "Home", "house.fill"), ("Hub", "Hub", "square.grid.2x2.fill"), ("Play", "Play", "gamecontroller.fill"),
+  ]
+  static let tools: [(route: String, title: String, icon: String)] = [
+    ("Sessions", "Claude Code & Codex", "terminal.fill"), ("Ask Molt", "Chat", "bubble.left.fill"), ("Settings", "Settings", "gearshape.fill"),
+  ]
   init(controller: PetController, coordinator: IslandCoordinator) {
     self.controller = controller
     self.coordinator = coordinator
@@ -338,7 +340,7 @@ struct IslandView: View {
     .tint(MoltTheme.accent(accent))
     .accentColor(MoltTheme.accent(accent))
     .onChange(of: coordinator.displayChoice) { _ in coordinator.reposition() }
-    .onExitCommand { if coordinator.menuOpen { coordinator.menuOpen = false } else { coordinator.collapse() } }
+    .onExitCommand { coordinator.collapse() }
     .onDrop(of: [.fileURL], isTargeted: nil) { providers in
       guard let provider = providers.first else { return false }
       _ = provider.loadObject(ofClass: URL.self) { url, _ in
@@ -356,44 +358,45 @@ struct IslandView: View {
   private var expandedContent: some View {
     VStack(spacing: 0) {
       header.frame(height: coordinator.headerHeight)
-      Group {
-        if controller.tab == "Notch" {
-          NotchHomeView(controller: controller, media: media)
-        } else {
-          CompanionView(controller: controller, compact: true)
-            .buttonStyle(NotchButtonStyle())
-        }
-      }
-      .modifier(NotchPageMotion(route: controller.tab))
-      .disabled(coordinator.menuOpen).accessibilityHidden(coordinator.menuOpen)
+      page
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .modifier(NotchPageMotion(route: controller.tab))
     }
     .foregroundStyle(.white)
-    .overlay(alignment: .topTrailing) {
-      if coordinator.menuOpen {
-        ZStack(alignment: .topTrailing) {
-          Color.black.opacity(0.35).contentShape(Rectangle()).onTapGesture { coordinator.menuOpen = false }
-          NotchNavigation(
-            selection: $controller.tab, accent: $accent, display: $coordinator.displayChoice,
-            hoverToOpen: $coordinator.hoverToOpen, shortcut: coordinator.shortcutMessage,
-            dismiss: { coordinator.menuOpen = false }
-          )
-          .frame(width: 250).padding(.trailing, 16).padding(.top, coordinator.headerHeight + 4).padding(.bottom, 14)
-        }
-        .transition(.opacity)
+    .buttonStyle(NotchButtonStyle())
+    .overlay(alignment: .bottom) {
+      if let error = controller.error {
+        Text(error).font(.system(size: 11, weight: .medium)).lineLimit(1)
+          .padding(.horizontal, 12).frame(height: 26)
+          .background(Capsule().fill(Color(white: 0.16)))
+          .padding(.bottom, 10)
+          .onTapGesture { controller.error = nil }
+          .task(id: error) {
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            if controller.error == error { controller.error = nil }
+          }
+          .transition(.opacity.combined(with: .move(edge: .bottom)))
       }
     }
-    .animation(motion, value: coordinator.menuOpen)
     .animation(motion, value: controller.tab)
+    .animation(motion, value: controller.error)
+  }
+
+  @ViewBuilder private var page: some View {
+    switch controller.tab {
+    case "Hub": HubView(controller: controller, hub: controller.hub)
+    case "Play": PlayView(controller: controller)
+    case "Sessions": SessionsView(sessions: controller.hub.sessions)
+    case "Ask Molt": PersonalChatView(assistant: assistant)
+    case "Settings": SettingsView(controller: controller, coordinator: coordinator, accent: $accent)
+    default: NotchHomeView(controller: controller, media: media)
+    }
   }
 
   private var header: some View {
     HStack(spacing: 0) {
       HStack(spacing: 4) {
-        tabButton("Notch", "Home", "house.fill")
-        tabButton("Hub", "Hub", "square.grid.2x2.fill")
-        if !["Notch", "Hub"].contains(controller.tab) {
-          tabButton(controller.tab, controller.tab == "Ask Molt" ? "Chat" : controller.tab, "circle.fill", dot: true)
-        }
+        ForEach(Self.tabs, id: \.route) { tab in tabButton(tab.route, tab.title, tab.icon) }
         Spacer(minLength: 0)
       }.frame(maxWidth: .infinity)
       if coordinator.hasNotch { Color.clear.frame(width: coordinator.notchWidth + 12) }
@@ -401,26 +404,27 @@ struct IslandView: View {
         Spacer(minLength: 0)
         if assistant.running {
           ProgressView().controlSize(.mini).padding(.trailing, 4)
-          iconButton("stop.fill", "Stop reply", action: assistant.cancel)
         }
-        iconButton("bubble.left.fill", "Chat") { controller.tab = "Ask Molt" }
-        iconButton("magnifyingglass", "Search with Molting") { controller.tab = "Molting" }
-        iconButton("plus", "Quick capture") { controller.tab = "Capture" }
-        iconButton(coordinator.menuOpen ? "xmark" : "ellipsis", coordinator.menuOpen ? "Close menu" : "All destinations and settings") {
-          coordinator.menuOpen.toggle()
+        ForEach(Self.tools, id: \.route) { tool in
+          Button { controller.tab = tool.route } label: {
+            Image(systemName: tool.icon).font(.system(size: 12, weight: .semibold))
+          }
+          .buttonStyle(NotchIconButtonStyle(size: 26, prominent: controller.tab == tool.route))
+          .background(Circle().fill(Color.white.opacity(controller.tab == tool.route ? 0.14 : 0)))
+          .help(tool.title).accessibilityLabel(tool.title)
+          .accessibilityAddTraits(controller.tab == tool.route ? .isSelected : [])
         }
       }.frame(maxWidth: .infinity)
     }
     .padding(.horizontal, 14)
   }
-  private func tabButton(_ route: String, _ title: String, _ icon: String, dot: Bool = false) -> some View {
+  private func tabButton(_ route: String, _ title: String, _ icon: String) -> some View {
     let selected = controller.tab == route
     return Button {
       controller.tab = route
-      coordinator.menuOpen = false
     } label: {
       HStack(spacing: 5) {
-        Image(systemName: icon).font(.system(size: dot ? 5 : 10, weight: .semibold))
+        Image(systemName: icon).font(.system(size: 10, weight: .semibold))
         Text(title).font(.system(size: 12, weight: .semibold)).lineLimit(1)
       }
       .foregroundStyle(selected ? Color.white : Color.white.opacity(0.5))
@@ -430,12 +434,5 @@ struct IslandView: View {
     }
     .buttonStyle(.plain)
     .accessibilityAddTraits(selected ? .isSelected : [])
-  }
-  private func iconButton(_ symbol: String, _ help: String, action: @escaping () -> Void) -> some View {
-    Button(action: action) {
-      Image(systemName: symbol).font(.system(size: 12, weight: .semibold))
-    }
-    .buttonStyle(NotchIconButtonStyle(size: 26))
-    .help(help).accessibilityLabel(help)
   }
 }

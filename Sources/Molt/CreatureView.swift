@@ -25,170 +25,129 @@ struct MoltTheme {
     }
     return Bundle.module.url(forResource: name, withExtension: ext, subdirectory: "Resources")
   }
-}
-private enum SpriteAtlas {
-  static let frames: [NSImage] = load(nil)
-  static var cache: [URL: [NSImage]] = [:]
-  static func images(_ url: URL?) -> [NSImage] {
-    guard let url else { return frames }
-    if let cached = cache[url] { return cached }
-    let result = load(url)
-    cache[url] = result
-    return result.isEmpty ? frames : result
-  }
-  private static func load(_ custom: URL?) -> [NSImage] {
-    guard let url = custom ?? MoltTheme.resource("Art/molt-atlas", extension: "png"),
-      let image = NSImage(contentsOf: url),
-      let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil)
-    else { return [] }
-    let w = cg.width / 4
-    let h = cg.height / 4
-    return (0..<16).compactMap { i in
-      cg.cropping(to: CGRect(x: (i % 4) * w, y: (i / 4) * h, width: w, height: h)).map {
-        NSImage(cgImage: $0, size: NSSize(width: w, height: h))
-      }
+  /// Molt's body color for each palette choice.
+  static func body(_ palette: String) -> Color {
+    switch palette {
+    case "ocean": return Color(red: 0.33, green: 0.62, blue: 0.96)
+    case "sunset": return Color(red: 0.96, green: 0.68, blue: 0.27)
+    case "violet": return Color(red: 0.66, green: 0.52, blue: 0.96)
+    default: return Color(red: 0.36, green: 0.80, blue: 0.55)
     }
   }
 }
+
+/// Molt, drawn as a small block of pixels: a wide body, two dot eyes, stubby arms, four legs
+/// and a leaf sprout. Every pose is a variation of the same 14 by 11 grid, with two rows of headroom for hops.
 struct CreatureView: View {
   var appearance: Appearance
-  var atlasURL: URL? = nil
   var mood: String
   var moving = true
-  var intensity = 0.6
-  var highContrast = false
-  var stage = "seed"
+  var walking = false
+  var facingLeft = false
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
-  @State private var visible = true
+  @Environment(\.moltReducedMotion) private var moltReduced
+  private var still: Bool { reduceMotion || moltReduced || !moving }
   var body: some View {
-    TimelineView(
-      .animation(
-        minimumInterval: 0.25, paused: !moving || reduceMotion || !visible || intensity == 0)
-    ) { context in
-      let time = context.date.timeIntervalSinceReferenceDate
-      let frame = frame(at: moving && !reduceMotion ? time : 0)
-      ZStack {
-        if SpriteAtlas.images(atlasURL).indices.contains(frame) {
-          Image(nsImage: SpriteAtlas.images(atlasURL)[frame]).resizable().interpolation(.none)
-            .scaledToFit()
-            .hueRotation(
-              .degrees(
-                ["sage": 0, "ocean": 80, "sunset": -65, "violet": 160][appearance.palette] ?? 0)
-            )
-            .scaleEffect(
-              x: appearance.body == "wide" ? 1.08 : 1, y: appearance.body == "tall" ? 1.08 : 1
-            )
-            .shadow(color: highContrast ? .black : .clear, radius: 1)
-        } else {
-          ZStack {
-            Ellipse().fill(MoltTheme.green)
-            HStack {
-              Circle()
-              Circle()
-            }.padding(40)
-          }.accessibilityLabel("Molt’s resting pose")
-        }
-        if appearance.accessory != "none" {
-          Image(
-            systemName: [
-              "scarf": "waveform.path", "hat": "graduationcap.fill", "glasses": "eyeglasses",
-              "backpack": "backpack.fill", "flower": "leaf.fill", "star": "star.fill",
-            ][appearance.accessory] ?? "star.fill"
-          )
-          .font(.system(size: appearance.accessory == "glasses" ? 36 : 25)).foregroundStyle(
-            appearance.accessory == "scarf" ? Color.orange : MoltTheme.ink
-          )
-          .offset(
-            x: appearance.accessory == "backpack" ? 38 : 0,
-            y: appearance.accessory == "hat" ? -55 : appearance.accessory == "glasses" ? -12 : 23)
-        }
-        if appearance.markings == "freckles" {
-          Text("·   ·").font(.title).foregroundStyle(.orange).offset(y: 10)
-        }
-        if stage == "radiant" {
-          Image(systemName: "sparkles").foregroundStyle(.yellow).offset(x: 50, y: -40)
+    TimelineView(.animation(minimumInterval: 0.16, paused: still)) { context in
+      let tick = still ? 0 : Int(context.date.timeIntervalSinceReferenceDate / 0.16)
+      Canvas { canvas, size in
+        let cell = floor(min(size.width / 14, size.height / 13))
+        guard cell > 0 else { return }
+        let origin = CGPoint(x: (size.width - cell * 14) / 2, y: (size.height - cell * 13) / 2)
+        for pixel in Self.pixels(pose: pose, tick: tick) {
+          let rect = CGRect(
+            x: origin.x + CGFloat(pixel.x) * cell, y: origin.y + CGFloat(pixel.y + 2) * cell,
+            width: cell, height: cell)
+          canvas.fill(Path(rect), with: .color(color(pixel.kind)))
         }
       }
-      .offset(
-        y: moving && !reduceMotion && mood != "sleeping" ? sin(time * 1.6) * 2 * intensity : 0
-      )
-      .animation(.easeInOut(duration: reduceMotion ? 0 : 0.25), value: frame)
-    }.onAppear { visible = true }.onDisappear { visible = false }
-      .accessibilityElement(children: .ignore).accessibilityLabel(
-        "Fin-eared Molt creature, \(mood)")
+      .scaleEffect(x: facingLeft ? -1 : 1, y: 1)
+      .overlay(alignment: .topTrailing) {
+        if pose == .sleep {
+          Text("z").font(.system(size: 9, weight: .bold, design: .rounded))
+            .foregroundStyle(Color.white.opacity(0.7))
+            .offset(y: still ? 0 : CGFloat(-(tick / 4 % 3)))
+        }
+      }
+    }
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel("Molt, \(mood)")
   }
-  private func frame(at time: Double) -> Int {
+
+  enum Pose { case idle, walk, sleep, eat, happy }
+  enum Kind { case body, eye, leaf, stem, mouth }
+  struct Pixel { var x: Int; var y: Int; var kind: Kind }
+
+  private var pose: Pose {
+    if walking { return .walk }
     switch mood {
-    case "sleeping", "sleepy": return 8
-    case "walking": return Int(time * 2) % 2 == 0 ? 4 : 5
-    case "eating", "hungry": return 10
-    case "drinking": return 11
-    case "thinking": return 13
-    case "celebrating", "evolving": return 14
-    case "sweating": return 15
-    case "happy", "playing": return Int(time) % 8 < 2 ? 12 : 0
-    case "stretching": return 6
-    case "yawning": return 7
-    case "waking": return 9
-    default:
-      let phase = Int(time) % 20
-      return phase == 0 ? 1 : phase == 5 ? 2 : phase > 16 ? 3 : 0
+    case "sleeping", "sleepy": return .sleep
+    case "eating", "hungry", "drinking": return .eat
+    case "happy", "celebrating", "playing", "evolving": return .happy
+    case "walking": return .walk
+    default: return .idle
     }
   }
-}
-struct PetView: View {
-  @ObservedObject var controller: PetController
-  var body: some View {
-    VStack(spacing: 0) {
-      if controller.companion.preferences.talkativeness != "silent" {
-        Text(controller.message).font(.system(size: 11, weight: .medium)).multilineTextAlignment(
-          .center
-        ).lineLimit(3)
-          .padding(9).frame(maxWidth: 215).background(
-            .regularMaterial, in: RoundedRectangle(cornerRadius: 14))
-      }
-      CreatureView(
-        appearance: controller.companion.appearance, atlasURL: controller.atlasURL,
-        mood: controller.mood,
-        moving: controller.petVisible && !controller.companion.preferences.reducedMotion
-          && controller.mood != "sweating",
-        intensity: controller.companion.preferences.animationIntensity,
-        highContrast: controller.companion.preferences.highContrast, stage: controller.state.stageID
-      ).frame(width: 145, height: 145)
-      HStack(spacing: 12) {
-        ForEach(Array(controller.definition.interactions.prefix(3)), id: \.id) { action in
-          Button {
-            controller.interact(action)
-          } label: {
-            Image(systemName: action.symbol).frame(width: 28, height: 26)
-          }.buttonStyle(.borderless).disabled(controller.blockReason(action) != nil).help(
-            controller.blockReason(action) ?? action.name
-          ).accessibilityLabel(action.name)
-        }
-        Button {
-          controller.onBringBack?()
-        } label: {
-          Image(systemName: "square.grid.2x2").frame(width: 28, height: 26)
-        }.buttonStyle(.borderless).help("Open dashboard")
-      }.padding(5).background(.regularMaterial, in: Capsule())
-    }.padding(8).frame(width: 250, height: 280)
-      .scaleEffect(controller.companion.preferences.size)
-      .frame(
-        width: 250 * controller.companion.preferences.size,
-        height: 280 * controller.companion.preferences.size)
+  private func color(_ kind: Kind) -> Color {
+    switch kind {
+    case .body: return MoltTheme.body(appearance.palette)
+    case .eye, .mouth: return Color(white: 0.07)
+    case .leaf: return Color(red: 0.49, green: 0.88, blue: 0.42)
+    case .stem: return Color(red: 0.2, green: 0.55, blue: 0.3)
+    }
+  }
+
+  static func pixels(pose: Pose, tick: Int) -> [Pixel] {
+    var out: [Pixel] = []
+    // Walking bobs by one pixel; sleeping settles one pixel lower; happy hops.
+    let lift: Int
+    switch pose {
+    case .walk: lift = tick % 2 == 0 ? 0 : -1
+    case .sleep: lift = 1
+    case .happy: lift = [0, -1, -2, -1][tick % 4]
+    default: lift = 0
+    }
+    func add(_ x: Int, _ y: Int, _ kind: Kind = .body) { out.append(Pixel(x: x, y: y + lift, kind: kind)) }
+    // Sprout, swaying gently.
+    let sway = pose == .sleep ? 0 : (tick / 5 % 2)
+    add(7 + sway, 0, .leaf); add(8 + sway, 0, .leaf); add(7, 1, .leaf); add(7, 2, .stem)
+    // Body, 10 by 6. Features are painted over it afterwards.
+    for y in 3...8 {
+      for x in 2...11 where !((x == 2 || x == 11) && (y == 3 || y == 8)) { add(x, y) }
+    }
+    let blink = pose == .idle && tick % 28 == 0
+    switch pose {
+    case .sleep: for x in [4, 5, 8, 9] { add(x, 6, .eye) }
+    case .happy: add(4, 5, .eye); add(9, 5, .eye)
+    default:
+      for y in blink ? [6] : [5, 6] { add(4, y, .eye); add(9, y, .eye) }
+    }
+    if pose == .eat && tick % 4 < 2 { add(6, 7, .mouth); add(7, 7, .mouth) }
+    // Arms: resting at the sides, raised when happy.
+    let armRow = pose == .happy ? (tick % 2 == 0 ? 3 : 4) : 6
+    add(1, armRow); add(12, armRow)
+    // Legs reach the ground from wherever the body is; a hop lifts everything,
+    // and alternate pairs step while walking.
+    for (index, x) in [3, 5, 8, 10].enumerated() {
+      let top = 9 + lift, ground = pose == .happy ? 10 + lift : 10
+      let raised = pose == .walk && index % 2 == tick % 2
+      for y in top...max(top, raised ? ground - 1 : ground) { out.append(Pixel(x: x, y: y, kind: .body)) }
+    }
+    return out
   }
 }
+
 struct MoltCard<Content: View>: View {
   var title: String
   @ViewBuilder var content: Content
   var body: some View {
-    VStack(alignment: .leading, spacing: 14) {
+    VStack(alignment: .leading, spacing: 8) {
       if !title.isEmpty {
-        Text(title).font(.system(size: 13, weight: .semibold)).foregroundStyle(.secondary)
+        Text(title).font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
       }
       content
-    }.padding(16).frame(maxWidth: .infinity, alignment: .leading).background(
-      NotchSurface(radius: 16)
+    }.padding(12).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).background(
+      NotchSurface(radius: 14)
     )
   }
 }

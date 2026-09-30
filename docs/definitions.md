@@ -1,5 +1,7 @@
 # Authoring a species
 
+As of 0.7.0 the app no longer shows species import, export or sprite atlases; Molt is drawn in code (see [art](art.md)). The definition format below still controls needs, care actions and evolution, and `MoltCore` continues to validate it.
+
 Start with one of the examples in `Sources/Molt/Resources`. Definitions without `schemaVersion` are version 1; version 2 adds optional cooldown and progression fields while preserving the original model. Current app version: 0.2.0.
 
 ## Core fields

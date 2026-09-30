@@ -7,6 +7,8 @@ import SwiftUI
   struct Saved: Codable {
     var place: Place?
     var usageConsent: Bool?
+    var widgets: [HubWidget]?
+    var note: String?
   }
   struct Place: Codable, Identifiable, Equatable {
     var id: Int; var name: String; var latitude: Double; var longitude: Double; var country: String?
@@ -46,7 +48,9 @@ import SwiftUI
   @Published var places: [Place] = []
   @Published var weather: Weather?
   @Published var busy = false
+  @Published var editing = false
   let media = NowPlayingController()
+  let actions = QuickActions()
   let library = MusicLibrary()
   let sessions: SessionsController
   private let url: URL
@@ -69,6 +73,35 @@ import SwiftUI
       try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
       try JSONEncoder().encode(saved).write(to: url, options: .atomic)
     } catch { status = "Could not save hub preferences: \(error.localizedDescription)" }
+  }
+
+  // MARK: Widgets
+
+  var layout: [HubWidget] {
+    HubLayout.sanitize(saved.widgets ?? HubLayout.defaults, known: Set(WidgetKind.catalog.map(\.id)))
+  }
+  func setLayout(_ layout: [HubWidget]?) {
+    guard let layout else { return }
+    saved.widgets = layout
+    save()
+  }
+  func add(_ kind: WidgetKind, at index: Int? = nil) {
+    let room = HubLayout.capacity - HubLayout.used(layout)
+    guard let span = kind.spans.first(where: { $0 <= room }) else { return }
+    setLayout(HubLayout.add(HubWidget(kind: kind.id, span: span, items: kind.id == "shortcuts" ? QuickActions.defaults : []), at: index, to: layout))
+  }
+  func remove(_ id: UUID) { setLayout(HubLayout.remove(id, from: layout)) }
+  func resize(_ widget: HubWidget) { setLayout(HubLayout.resize(widget.id, to: widget.span == 1 ? 2 : 1, in: layout)) }
+  func move(_ id: UUID, before target: UUID?) { setLayout(HubLayout.move(id, before: target, in: layout)) }
+  func setItems(_ id: UUID, _ items: [String]) {
+    var next = layout
+    guard let index = next.firstIndex(where: { $0.id == id }) else { return }
+    next[index].items = Array(items.prefix(8))
+    setLayout(next)
+  }
+  func canResize(_ widget: HubWidget) -> Bool {
+    guard let kind = WidgetKind.find(widget.kind), kind.spans.count > 1 else { return false }
+    return widget.span == 2 || HubLayout.used(layout) < HubLayout.capacity
   }
 
   // MARK: Volume

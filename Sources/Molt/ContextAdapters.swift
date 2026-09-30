@@ -156,11 +156,9 @@ import UserNotifications
   ) {
     guard Bundle.main.bundleURL.pathExtension == "app" else { return }
     let center = UNUserNotificationCenter.current()
-    center.removeAllPendingNotificationRequests()
-    guard enabled else { return }
     let now = Date()
     var occurrences: [(Reminder, Date)] = []
-    for reminder in reminders.filter({ !$0.completed }) {
+    for reminder in reminders.filter({ !$0.completed }) where enabled {
       var date = reminder.due
       // A stale reminder stays visible in Today; do not replay old alerts.
       var count = 0
@@ -181,22 +179,28 @@ import UserNotifications
         date = next
       }
     }
-    for (reminder, date) in occurrences.sorted(by: { $0.1 < $1.1 }).prefix(60) {
+    let requests = occurrences.sorted(by: { $0.1 < $1.1 }).prefix(60).map { reminder, date -> UNNotificationRequest in
       let content = UNMutableNotificationContent()
       content.title = "\(name) reminder"
       content.body = reminder.title
       if quiet.sound && !quiet.quiet(at: date) { content.sound = .default }
       let trigger = UNTimeIntervalNotificationTrigger(
         timeInterval: max(1, date.timeIntervalSinceNow), repeats: false)
-      center.add(
-        UNNotificationRequest(
-          identifier: "\(reminder.id.uuidString)-\(Int(date.timeIntervalSince1970))",
-          content: content, trigger: trigger)
-      ) { [weak self] error in
-        if let error {
+      return UNNotificationRequest(
+        identifier: "\(reminder.id.uuidString)-\(Int(date.timeIntervalSince1970))",
+        content: content, trigger: trigger)
+    }
+    // Replace reminder alerts only; other Molt notifications (such as the 2FA nudge) stay.
+    // New alerts are added after the old ones are removed, never before.
+    let kept: Set<String> = [AccountController.reminderID]
+    center.getPendingNotificationRequests { [weak self] pending in
+      let owner = self
+      center.removePendingNotificationRequests(withIdentifiers: pending.map(\.identifier).filter { !kept.contains($0) })
+      for request in requests {
+        center.add(request) { error in
+          guard let error else { return }
           Task { @MainActor in
-            self?.notificationStatus =
-              "Scheduling failed: \(error.localizedDescription). Reminder remains in Today."
+            owner?.notificationStatus = "Scheduling failed: \(error.localizedDescription). Reminder remains in Today."
           }
         }
       }

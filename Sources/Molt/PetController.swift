@@ -24,6 +24,8 @@ import SwiftUI
   @Published var dashboardVisible = true
   let hub: HubController
   let assistant: AssistantController
+  let account: AccountController
+  let social: SocialController
   let clock = CompanionClock()
   let contexts = ContextAdapters()
   let organizationStore: OrganizationStore
@@ -52,6 +54,8 @@ import SwiftUI
       ).appendingPathComponent("Molt")
     hub = HubController(directory: directory)
     assistant = AssistantController(directory: directory)
+    account = AccountController(preview: supplied != nil)
+    social = SocialController(account: account)
     store = PetStore(directory: directory)
     let bundled = try PetStore.definition(at: BundledDefinitions.url("molt"))
     organizationStore = try OrganizationStore(

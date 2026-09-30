@@ -12,7 +12,7 @@ import SwiftUI
   @Published var conversation: [InferenceMessage] = []
   @Published var sharedImage: Data?
   let screenHelp = ScreenHelp()
-  let molting = MoltingController()
+  let research = WebResearchController()
   @Published var status = "Connect to Ollama when you are ready to chat."
   @Published var running = false
   @Published var attachment = ""
@@ -159,6 +159,11 @@ import SwiftUI
           Task.isCancelled ? "Canceled. Partial response retained." : error.localizedDescription
       }
     }
+  }
+  /// A one-off answer outside the chat thread, used by Lens. Nil until Ollama is connected.
+  func answer(_ messages: [InferenceMessage]) -> AsyncThrowingStream<String, Error>? {
+    guard !selectedModel.isEmpty else { return nil }
+    return provider.stream(model: selectedModel, messages: messages)
   }
   func newConversation() {
     cancel()

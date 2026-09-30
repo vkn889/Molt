@@ -58,7 +58,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       title: "\(controller.petName) · Day \(controller.age + 1)", action: nil, keyEquivalent: "")
     title.isEnabled = false
     menu.addItem(title)
+    if controller.hub.actions.recording != nil {
+      add("Stop screen recording", #selector(stopRecording), to: menu)
+      menu.addItem(.separator())
+    }
     add("Open Molt", #selector(openHome), to: menu, key: "o")
+    add("Ask about screen", #selector(openLens), to: menu, key: "l")
     add("Play with \(controller.petName)", #selector(openPlay), to: menu)
     add("Settings…", #selector(openSettings), to: menu, key: ",")
     menu.addItem(.separator())
@@ -79,6 +84,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     island?.open()
   }
   @objc private func openHome() { show("Notch") }
+  @objc private func openLens() { island?.startLens() }
+  @objc private func stopRecording() { controller?.hub.actions.stopRecording() }
   @objc private func openPlay() { show("Play") }
   @objc private func openSettings() { show("Settings") }
   @objc private func toggleTracking() {
@@ -139,6 +146,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       app.run()
       return
     }
+    if let index = CommandLine.arguments.firstIndex(of: "--cloud-selftest"), CommandLine.arguments.count > index + 4 {
+      // Development check of the realtime client against the live service, using two test accounts.
+      let args = Array(CommandLine.arguments[(index + 1)...(index + 4)])
+      Task { @MainActor in
+        let ok = await CloudSelfTest.run(emailA: args[0], passwordA: args[1], emailB: args[2], passwordB: args[3])
+        exit(ok ? 0 : 1)
+      }
+      app.run()
+      return
+    }
     if let index = CommandLine.arguments.firstIndex(of: "--render-iconset"),
       CommandLine.arguments.count > index + 1
     {
@@ -178,8 +195,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       controller.changeCompanion { $0.preferences.sleepStart = 0; $0.preferences.sleepEnd = 0 }
       controller.mood = CommandLine.arguments[index + 1]
     }
-    for (flag, tab) in [("--hub", "Hub"), ("--play", "Play"), ("--sessions", "Sessions"), ("--chat", "Ask Molt"), ("--settings", "Settings")]
-    where CommandLine.arguments.contains(flag) { controller.tab = tab }
+    for (flag, tab) in [
+      ("--hub", "Hub"), ("--play", "Play"), ("--sessions", "Sessions"), ("--chat", "Ask Molt"), ("--settings", "Settings"),
+      ("--molting", "Molting"), ("--lens", "Lens"), ("--health", "Health"),
+    ] where CommandLine.arguments.contains(flag) { controller.tab = tab }
+    if CommandLine.arguments.contains("--edit") { controller.hub.editing = true }
+    if CommandLine.arguments.contains("--signed-out") { controller.account.previewSignedOut() }
+    if let index = CommandLine.arguments.firstIndex(of: "--widgets"), CommandLine.arguments.count > index + 1 {
+      // For previews: a comma-separated list of kind:span, such as shortcuts:2,recorder:1,lens:1.
+      controller.hub.setLayout(CommandLine.arguments[index + 1].split(separator: ",").map { entry in
+        let parts = entry.split(separator: ":")
+        return HubWidget(kind: String(parts[0]), span: parts.count > 1 ? Int(parts[1]) ?? 1 : 1,
+          items: parts[0] == "shortcuts" ? QuickActions.defaults + ["action:dark", "action:mute", "action:lens", "action:downloads"] : [])
+      })
+    }
     controller.healthEnabled = true
     controller.refreshHealth()
     Thread.sleep(forTimeInterval: 0.3)

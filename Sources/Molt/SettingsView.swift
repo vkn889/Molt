@@ -9,16 +9,26 @@ struct SettingsView: View {
   @ObservedObject var sessions: SessionsController
   @ObservedObject var spotify: SpotifyAccount
   @ObservedObject var appleMusic: AppleMusicLibrary
+  @ObservedObject var account: AccountController
   @Binding var accent: String
+  @State private var showingAccount = false
   init(controller: PetController, coordinator: IslandCoordinator, accent: Binding<String>) {
     self.controller = controller
     self.coordinator = coordinator
     self.sessions = controller.hub.sessions
     self.spotify = controller.hub.library.spotify
     self.appleMusic = controller.hub.library.appleMusic
+    self.account = controller.account
     _accent = accent
   }
   var body: some View {
+    if showingAccount {
+      AccountPanel(account: account) { showingAccount = false }
+    } else {
+      columns
+    }
+  }
+  private var columns: some View {
     HStack(alignment: .top, spacing: 12) {
       column("Molt") {
         HStack(spacing: 8) {
@@ -42,12 +52,16 @@ struct SettingsView: View {
           }
         }
         toggle("Reduce motion", pref(\.reducedMotion))
-      }
-      column("Notch") {
-        toggle("Open on hover", $coordinator.hoverToOpen)
-        toggle("Mac health", $controller.healthEnabled)
         toggle("Launch at login", Binding(
           get: { SMAppService.mainApp.status == .enabled }, set: { controller.setLogin($0) }))
+      }
+      column("Notch & Mac") {
+        toggle("Open on hover", $coordinator.hoverToOpen)
+        toggle("Mac health", $controller.healthEnabled)
+        toggle("Calendar", Binding(get: { controller.organization.consent.calendar }, set: setCalendar))
+        toggle("App usage", Binding(
+          get: { controller.organization.consent.tracking },
+          set: { value in controller.updateOrganization { $0.consent.tracking = value }; controller.configureContext() }))
         HStack {
           Text("Display").font(.system(size: 11)).foregroundStyle(Color.white.opacity(0.8))
           Spacer()
@@ -59,13 +73,20 @@ struct SettingsView: View {
             }
           }.labelsHidden().controlSize(.small).frame(width: 110)
         }
-        Text(coordinator.shortcutMessage).font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(2)
       }
       column("Connections") {
-        toggle("Calendar", Binding(get: { controller.organization.consent.calendar }, set: setCalendar))
-        toggle("App usage", Binding(
-          get: { controller.organization.consent.tracking },
-          set: { value in controller.updateOrganization { $0.consent.tracking = value }; controller.configureContext() }))
+        Button { showingAccount = true } label: {
+          HStack(spacing: 6) {
+            Image(systemName: account.mfaEnabled ? "lock.shield.fill" : "person.crop.circle.fill")
+              .foregroundStyle(account.mfaEnabled ? Color.green : Color.accentColor)
+            Text("@\(account.profile?.username ?? "account")").font(.system(size: 11, weight: .medium)).lineLimit(1)
+            Spacer(minLength: 4)
+            if !account.mfaEnabled {
+              Text("Turn on 2FA").font(.system(size: 10, weight: .semibold)).foregroundStyle(.orange)
+            }
+            Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
+          }.contentShape(Rectangle())
+        }.buttonStyle(.plain)
         toggle("Claude Code & Codex", $sessions.enabled)
         toggle("Keep copies of chats", $sessions.archive).disabled(!sessions.enabled)
         connection("Spotify", connected: spotify.connected, detail: spotify.userName,

@@ -2,7 +2,7 @@ import AppKit
 import MoltCore
 import SwiftUI
 
-@MainActor final class MoltingController: ObservableObject {
+@MainActor final class WebResearchController: ObservableObject {
   @Published var researchURLs = ""
   @Published var researchSources: [ReadWebPage] = []
   @Published var researchFailures: [String] = []

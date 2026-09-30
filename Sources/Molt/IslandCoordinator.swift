@@ -20,7 +20,10 @@ import SwiftUI
   /// Outward flare where the panel meets the menu bar, and the lower corner radius.
   static let flare: CGFloat = 14
   private let controller: PetController
+  let lens: LensController
+  let health = HealthDetailController()
   private var panel: FloatingPanel?
+  private var lensKey: EventHotKeyRef?
   private var screen: NSScreen?
   private var previousApp: NSRunningApplication?
   private var hotKey: EventHotKeyRef?
@@ -35,6 +38,7 @@ import SwiftUI
   private var subscriptions = Set<AnyCancellable>()
   init(controller: PetController, preview: Bool = false) {
     self.controller = controller
+    lens = LensController(assistant: controller.assistant)
     super.init()
     if preview {
       expanded = true
@@ -59,10 +63,17 @@ import SwiftUI
       eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
     InstallEventHandler(
       GetApplicationEventTarget(),
-      { _, _, pointer in
-        guard let pointer else { return OSStatus(eventNotHandledErr) }
+      { _, event, pointer in
+        guard let pointer, let event else { return OSStatus(eventNotHandledErr) }
+        var key = EventHotKeyID()
+        GetEventParameter(
+          event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID), nil,
+          MemoryLayout<EventHotKeyID>.size, nil, &key)
         let coordinator = Unmanaged<IslandCoordinator>.fromOpaque(pointer).takeUnretainedValue()
-        Task { @MainActor in coordinator.toggleFromShortcut() }
+        let id = key.id
+        Task { @MainActor in
+          if id == 2 { coordinator.startLens() } else { coordinator.toggleFromShortcut() }
+        }
         return noErr
       }, 1, &type, Unmanaged.passUnretained(self).toOpaque(), &handler)
     registerShortcut()
@@ -72,11 +83,30 @@ import SwiftUI
     NSWorkspace.shared.notificationCenter.addObserver(
       self, selector: #selector(reposition), name: NSWorkspace.didWakeNotification, object: nil)
     let media = controller.hub.media
-    media.$isPlaying.combineLatest(media.$track)
-      .map { playing, track in playing && track != nil }
+    let actions = controller.hub.actions
+    media.$isPlaying.combineLatest(media.$track, actions.$recording)
+      .map { playing, track, recording in (playing && track != nil) || recording != nil }
       .removeDuplicates()
-      .sink { [weak self] playing in self?.setLiveActivity(playing) }
+      .sink { [weak self] active in self?.setLiveActivity(active) }
       .store(in: &subscriptions)
+    lens.hide = { [weak self] in self?.collapse() }
+    lens.show = { [weak self] in
+      guard let self else { return }
+      self.controller.tab = "Lens"
+      self.open()
+    }
+    actions.onLens = { [weak self] in self?.startLens() }
+    actions.onFocus = { [weak controller] in controller?.focus(minutes: 25) }
+    actions.beforeCapture = { [weak self] in self?.collapse() }
+    // Friends and hangouts connect once you're signed in.
+    controller.account.$phase.removeDuplicates()
+      .sink { [weak controller] phase in
+        Task { @MainActor in
+          if phase == .signedIn { controller?.social.start() } else { controller?.social.stop() }
+        }
+      }
+      .store(in: &subscriptions)
+    bridgeSetup()
     controller.$tab.removeDuplicates().dropFirst()
       .sink { [weak self] _ in Task { @MainActor [weak self] in self?.fitToContent() } }
       .store(in: &subscriptions)
@@ -122,9 +152,13 @@ import SwiftUI
     let result = RegisterEventHotKey(
       UInt32(key), UInt32(cmdKey | shiftKey), EventHotKeyID(signature: 0x4D4F_4C54, id: 1),
       GetApplicationEventTarget(), 0, &hotKey)
+    if let lensKey { UnregisterEventHotKey(lensKey); self.lensKey = nil }
+    RegisterEventHotKey(
+      UInt32(kVK_ANSI_L), UInt32(cmdKey | shiftKey), EventHotKeyID(signature: 0x4D4F_4C54, id: 2),
+      GetApplicationEventTarget(), 0, &lensKey)
     shortcutMessage =
       result == noErr
-      ? "Command-Shift-Enter opens and closes Molt"
+      ? "⌘⇧↩ opens Molt · ⌘⇧L asks about your screen"
       : "Shortcut unavailable (\(result)). Use the menu bar to open Molt."
   }
   func toggle() { expanded ? collapse() : open() }
@@ -134,6 +168,36 @@ import SwiftUI
     } else {
       controller.tab = "Notch"
       open()
+    }
+  }
+
+  func startLens() {
+    guard controller.account.phase == .signedIn else { controller.tab = "Notch"; open(); return }
+    lens.clear()
+    lens.capture()
+  }
+  /// What a friend borrows when you lend your setup: Hub widgets, accent color and Molt's color.
+  private func bridgeSetup() {
+    let controller = self.controller
+    controller.social.captureSetup = {
+      let widgets = (try? JSONSerialization.jsonObject(with: JSONEncoder().encode(controller.hub.layout))) ?? []
+      return [
+        "widgets": widgets, "accent": UserDefaults.standard.string(forKey: "islandAccent") ?? "blue",
+        "palette": controller.companion.appearance.palette,
+      ]
+    }
+    controller.social.applySetup = { setup in
+      if let widgets = setup["widgets"], let data = try? JSONSerialization.data(withJSONObject: widgets),
+        let layout = try? JSONDecoder().decode([HubWidget].self, from: data)
+      {
+        controller.hub.setLayout(HubLayout.sanitize(layout, known: Set(WidgetKind.catalog.map(\.id))))
+      }
+      if let accent = setup["accent"] as? String, ["blue", "mint", "violet", "amber", "rose"].contains(accent) {
+        UserDefaults.standard.set(accent, forKey: "islandAccent")
+      }
+      if let palette = setup["palette"] as? String, ["sage", "ocean", "sunset", "violet"].contains(palette) {
+        controller.changeCompanion { $0.appearance.palette = palette }
+      }
     }
   }
 
@@ -164,6 +228,7 @@ import SwiftUI
   func collapse() {
     guard expanded else { return }
     expanded = false
+    controller.hub.editing = false
     openedByHover = false
     controller.dashboardVisible = false
     controller.hub.media.active = false
@@ -292,21 +357,32 @@ struct IslandView: View {
   @ObservedObject var coordinator: IslandCoordinator
   @ObservedObject var assistant: AssistantController
   @ObservedObject var media: NowPlayingController
+  @ObservedObject var account: AccountController
+  @ObservedObject var social: SocialController
+  @ObservedObject var hub: HubController
+  @ObservedObject var actions: QuickActions
   @AppStorage("islandAccent") private var accent = "blue"
   @Environment(\.accessibilityReduceMotion) private var systemReduced
   private var reduced: Bool { controller.companion.preferences.reducedMotion || systemReduced }
   private var motion: Animation? { reduced ? nil : .spring(response: 0.34, dampingFraction: 0.86) }
   static let tabs: [(route: String, title: String, icon: String)] = [
     ("Notch", "Home", "house.fill"), ("Hub", "Hub", "square.grid.2x2.fill"), ("Play", "Play", "gamecontroller.fill"),
+    ("Molting", "Molting", "person.2.fill"),
   ]
   static let tools: [(route: String, title: String, icon: String)] = [
-    ("Sessions", "Claude Code & Codex", "terminal.fill"), ("Ask Molt", "Chat", "bubble.left.fill"), ("Settings", "Settings", "gearshape.fill"),
+    ("Lens", "Ask about your screen (⌘⇧L)", "text.viewfinder"), ("Sessions", "Claude Code & Codex", "terminal.fill"),
+    ("Ask Molt", "Chat", "bubble.left.fill"), ("Settings", "Settings", "gearshape.fill"),
   ]
+  private var signedIn: Bool { account.phase == .signedIn }
   init(controller: PetController, coordinator: IslandCoordinator) {
     self.controller = controller
     self.coordinator = coordinator
     self.assistant = controller.assistant
     self.media = controller.hub.media
+    self.account = controller.account
+    self.social = controller.social
+    self.hub = controller.hub
+    self.actions = controller.hub.actions
   }
   var body: some View {
     let reveal = coordinator.reveal
@@ -319,10 +395,12 @@ struct IslandView: View {
     ZStack(alignment: .top) {
       shape.fill(Color.black)
       if coordinator.liveActivity && !coordinator.expanded {
-        NotchLiveActivity(media: media, notchWidth: coordinator.notchWidth, height: collapsed.height)
+        NotchLiveActivity(media: media, actions: actions, notchWidth: coordinator.notchWidth, height: collapsed.height)
           .frame(width: collapsed.width, height: collapsed.height)
           .contentShape(Rectangle())
-          .onTapGesture { controller.tab = "Notch"; coordinator.open() }
+          .onTapGesture {
+            if actions.recording != nil { actions.stopRecording() } else { controller.tab = "Notch"; coordinator.open() }
+          }
           .transition(.opacity)
       }
       if coordinator.expanded {
@@ -364,6 +442,21 @@ struct IslandView: View {
     }
     .foregroundStyle(.white)
     .buttonStyle(NotchButtonStyle())
+    .overlay(alignment: .top) {
+      if signedIn, controller.tab != "Molting", let invite = social.invites.first {
+        HStack(spacing: 8) {
+          Image(systemName: "figure.2").foregroundStyle(Color.accentColor)
+          Text("@\(invite.from.username) wants to hang out").font(.system(size: 12, weight: .semibold))
+          Button("Join") { social.accept(invite); controller.tab = "Molting" }
+          Button("Later") { social.decline(invite) }.buttonStyle(.plain).font(.system(size: 11)).foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 12).frame(height: 32)
+        .background(Capsule().fill(Color(white: 0.14)))
+        .overlay(Capsule().strokeBorder(Color.white.opacity(0.1)))
+        .padding(.top, coordinator.headerHeight + 6)
+        .transition(.move(edge: .top).combined(with: .opacity))
+      }
+    }
     .overlay(alignment: .bottom) {
       if let error = controller.error {
         Text(error).font(.system(size: 11, weight: .medium)).lineLimit(1)
@@ -380,11 +473,22 @@ struct IslandView: View {
     }
     .animation(motion, value: controller.tab)
     .animation(motion, value: controller.error)
+    .animation(motion, value: social.invites)
   }
 
   @ViewBuilder private var page: some View {
+    if !signedIn {
+      AccountGate(account: account, appearance: controller.companion.appearance)
+    } else {
+      signedInPage
+    }
+  }
+  @ViewBuilder private var signedInPage: some View {
     switch controller.tab {
     case "Hub": HubView(controller: controller, hub: controller.hub)
+    case "Molting": MoltingView(social: social, account: account, appearance: controller.companion.appearance)
+    case "Lens": LensView(lens: coordinator.lens)
+    case "Health": HealthDetailView(detail: coordinator.health, controller: controller)
     case "Play": PlayView(controller: controller)
     case "Sessions": SessionsView(sessions: controller.hub.sessions)
     case "Ask Molt": PersonalChatView(assistant: assistant)
@@ -396,43 +500,75 @@ struct IslandView: View {
   private var header: some View {
     HStack(spacing: 0) {
       HStack(spacing: 4) {
-        ForEach(Self.tabs, id: \.route) { tab in tabButton(tab.route, tab.title, tab.icon) }
+        if signedIn {
+          ForEach(Self.tabs, id: \.route) { tab in tabButton(tab.route, tab.title, tab.icon) }
+          if !Self.tabs.contains(where: { $0.route == controller.tab }) && !Self.tools.contains(where: { $0.route == controller.tab }) {
+            tabButton(controller.tab, controller.tab, "chevron.right")
+          }
+        } else {
+          Label("Molt", systemImage: "leaf.fill").font(.system(size: 12, weight: .semibold)).padding(.leading, 6)
+        }
         Spacer(minLength: 0)
       }.frame(maxWidth: .infinity)
       if coordinator.hasNotch { Color.clear.frame(width: coordinator.notchWidth + 12) }
       HStack(spacing: 2) {
         Spacer(minLength: 0)
-        if assistant.running {
+        if assistant.running || coordinator.lens.running {
           ProgressView().controlSize(.mini).padding(.trailing, 4)
         }
-        ForEach(Self.tools, id: \.route) { tool in
-          Button { controller.tab = tool.route } label: {
-            Image(systemName: tool.icon).font(.system(size: 12, weight: .semibold))
+        if signedIn && controller.tab == "Hub" {
+          Button { hub.editing.toggle() } label: {
+            Image(systemName: hub.editing ? "checkmark" : "pencil").font(.system(size: 12, weight: .semibold))
           }
-          .buttonStyle(NotchIconButtonStyle(size: 26, prominent: controller.tab == tool.route))
-          .background(Circle().fill(Color.white.opacity(controller.tab == tool.route ? 0.14 : 0)))
-          .help(tool.title).accessibilityLabel(tool.title)
-          .accessibilityAddTraits(controller.tab == tool.route ? .isSelected : [])
+          .buttonStyle(NotchIconButtonStyle(size: 26, prominent: hub.editing))
+          .background(Circle().fill(hub.editing ? Color.accentColor : Color.clear))
+          .help(hub.editing ? "Done" : "Edit widgets").accessibilityLabel(hub.editing ? "Done editing" : "Edit widgets")
+          .padding(.trailing, 4)
+        }
+        if signedIn {
+          ForEach(Self.tools, id: \.route) { tool in
+            Button { controller.tab = tool.route } label: {
+              Image(systemName: tool.icon).font(.system(size: 12, weight: .semibold))
+            }
+            .buttonStyle(NotchIconButtonStyle(size: 26, prominent: controller.tab == tool.route))
+            .background(Circle().fill(Color.white.opacity(controller.tab == tool.route ? 0.14 : 0)))
+            .overlay(alignment: .topTrailing) {
+              // A quiet nudge until two-factor authentication is on.
+              if tool.route == "Settings" && !account.mfaEnabled && account.profile != nil {
+                Circle().fill(Color.orange).frame(width: 6, height: 6).offset(x: -3, y: 3)
+              }
+            }
+            .help(tool.title).accessibilityLabel(tool.title)
+            .accessibilityAddTraits(controller.tab == tool.route ? .isSelected : [])
+          }
         }
       }.frame(maxWidth: .infinity)
     }
     .padding(.horizontal, 14)
   }
+  /// The selected tab shows its name; the others are icons, so four fit beside the notch.
   private func tabButton(_ route: String, _ title: String, _ icon: String) -> some View {
     let selected = controller.tab == route
     return Button {
       controller.tab = route
     } label: {
       HStack(spacing: 5) {
-        Image(systemName: icon).font(.system(size: 10, weight: .semibold))
-        Text(title).font(.system(size: 12, weight: .semibold)).lineLimit(1)
+        Image(systemName: icon).font(.system(size: 11, weight: .semibold))
+        if selected { Text(title).font(.system(size: 12, weight: .semibold)).lineLimit(1) }
+      }
+      .overlay(alignment: .topTrailing) {
+        if route == "Molting" && !social.invites.isEmpty {
+          Circle().fill(Color.accentColor).frame(width: 6, height: 6).offset(x: 4, y: -3)
+        }
       }
       .foregroundStyle(selected ? Color.white : Color.white.opacity(0.5))
-      .padding(.horizontal, 10).frame(height: 24)
+      .padding(.horizontal, selected ? 10 : 8).frame(height: 24)
       .background(Capsule().fill(Color.white.opacity(selected ? 0.14 : 0)))
       .contentShape(Capsule())
     }
     .buttonStyle(.plain)
+    .help(title)
+    .accessibilityLabel(title)
     .accessibilityAddTraits(selected ? .isSelected : [])
   }
 }

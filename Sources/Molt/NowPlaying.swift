@@ -8,12 +8,17 @@ import SwiftUI
 @MainActor final class NowPlayingController: ObservableObject {
   enum Player: String, CaseIterable {
     case spotify = "Spotify", music = "Music"
-    var bundleID: String { self == .spotify ? "com.spotify.client" : "com.apple.Music" }
+    /// Spotify playing on another device, followed through the connected account.
+    case spotifyConnect = "Spotify Connect"
+    static let local: [Player] = [.spotify, .music]
+    var bundleID: String { self == .music ? "com.apple.Music" : "com.spotify.client" }
     var notification: String {
       self == .spotify ? "com.spotify.client.PlaybackStateChanged" : "com.apple.Music.playerInfo"
     }
-    var displayName: String { self == .spotify ? "Spotify" : "Apple Music" }
-    var isRunning: Bool { !NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).isEmpty }
+    var displayName: String { self == .music ? "Apple Music" : "Spotify" }
+    var isRunning: Bool {
+      self != .spotifyConnect && !NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).isEmpty
+    }
   }
   struct Track: Equatable {
     var title: String
@@ -28,6 +33,7 @@ import SwiftUI
   @Published private(set) var position: Double = 0
   @Published private(set) var positionDate = Date()
   @Published private(set) var permissionNeeded = false
+  weak var spotify: SpotifyAccount?
   /// True while the notch is open; position is polled only then.
   var active = false {
     didSet {
@@ -38,7 +44,7 @@ import SwiftUI
       refresh()
       poll = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
         Task { @MainActor [weak self] in
-          guard let self, self.player != nil else { return }
+          guard let self else { return }
           self.refresh()
         }
       }
@@ -52,7 +58,7 @@ import SwiftUI
 
   init() {
     let distributed = DistributedNotificationCenter.default()
-    for candidate in Player.allCases {
+    for candidate in Player.local {
       observers.append(
         distributed.addObserver(forName: .init(candidate.notification), object: nil, queue: .main) {
           [weak self] note in
@@ -88,18 +94,24 @@ import SwiftUI
 
   func playPause() {
     guard let player else { openPreferredPlayer(); return }
-    isPlaying.toggle()
     position = elapsed(at: Date())
     positionDate = Date()
+    isPlaying.toggle()
+    if player == .spotifyConnect { remote(isPlaying ? "play" : "pause"); return }
     command("playpause", on: player)
   }
-  func next() { if let player { command("next track", on: player) } }
-  func previous() { if let player { command("previous track", on: player) } }
+  func next() {
+    if player == .spotifyConnect { remote("next") } else if let player { command("next track", on: player) }
+  }
+  func previous() {
+    if player == .spotifyConnect { remote("previous") } else if let player { command("previous track", on: player) }
+  }
   func seek(to seconds: Double) {
     guard let player, let track else { return }
     let target = min(max(0, seconds), max(0, track.duration - 1))
     position = target
     positionDate = Date()
+    if player == .spotifyConnect { remote("seek", seconds: target); return }
     command(String(format: "set player position to %.2f", locale: Locale(identifier: "en_US_POSIX"), target), on: player)
   }
   func openPlayerApp() {
@@ -112,8 +124,15 @@ import SwiftUI
       NSWorkspace.shared.open(url)
     }
   }
+  private func remote(_ verb: String, seconds: Double = 0) {
+    spotify?.control(verb, seconds: seconds)
+    Task { @MainActor in
+      try? await Task.sleep(nanoseconds: 600_000_000)
+      self.refresh()
+    }
+  }
   private func openPreferredPlayer() {
-    let preferred = Player.allCases.first {
+    let preferred = Player.local.first {
       NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0.bundleID) != nil
     }
     guard let preferred, let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: preferred.bundleID)
@@ -169,8 +188,8 @@ import SwiftUI
   }
   func refresh() {
     guard !refreshing else { return }
-    let running = Player.allCases.filter(\.isRunning)
-    guard !running.isEmpty else { clear(); return }
+    let running = Player.local.filter(\.isRunning)
+    guard !running.isEmpty else { refreshRemote(); return }
     refreshing = true
     let current = player
     queue.async {
@@ -191,11 +210,26 @@ import SwiftUI
           ?? snapshots.first
         // Without Automation access, keep whatever the players' own notifications reported.
         guard let (source, snapshot) = chosen else {
-          if !denied { self.clear() }
+          if !denied { self.refreshing = true; self.refreshRemote() }
           return
         }
         self.apply(snapshot, from: source)
       }
+    }
+  }
+  /// Falls back to Spotify on another device when no player on this Mac has anything loaded.
+  private func refreshRemote() {
+    guard let spotify, spotify.connected else { refreshing = false; clear(); return }
+    refreshing = true
+    Task {
+      let remote = await spotify.currentlyPlaying()
+      self.refreshing = false
+      guard let remote, !remote.title.isEmpty else { self.clear(); return }
+      var snapshot = Snapshot(
+        track: Track(title: remote.title, artist: remote.artist, album: remote.album, duration: remote.duration),
+        playing: remote.playing, position: remote.position)
+      snapshot.artworkURL = remote.artwork?.absoluteString
+      self.apply(snapshot, from: .spotifyConnect)
     }
   }
   private func apply(_ snapshot: Snapshot, from source: Player) {
@@ -211,7 +245,7 @@ import SwiftUI
     loadArtwork(source, remote: snapshot.artworkURL, key: key)
   }
   private func loadArtwork(_ source: Player, remote: String?, key: String) {
-    if source == .spotify {
+    if source != .music {
       guard let remote, let url = URL(string: remote), url.scheme == "https",
         let host = url.host, host.hasSuffix(".scdn.co") || host.hasSuffix(".spotifycdn.com")
       else { return }
@@ -245,6 +279,11 @@ import SwiftUI
     var playing: Bool
     var position: Double
     var artworkURL: String?
+    init(track: Track, playing: Bool, position: Double) {
+      self.track = track
+      self.playing = playing
+      self.position = position
+    }
     init?(_ text: String) {
       let parts = text.components(separatedBy: "\t")
       guard parts.count >= 6, parts[0] != "stopped", !parts[1].isEmpty else { return nil }

@@ -18,8 +18,9 @@ import SwiftUI
   @Published var organizationError: String?
   @Published var game: GameSession?
   @Published var health = SystemHealthSnapshot()
-  @Published var tab = "Today"
-  @Published var petVisible = true
+  @Published var tab = "Notch"
+  /// Times of recent care, so Molt livens up the more you play together.
+  @Published var recentCare: [Date] = (UserDefaults.standard.array(forKey: "recentCare") as? [Date]) ?? []
   @Published var dashboardVisible = true
   let hub: HubController
   let assistant: AssistantController
@@ -27,9 +28,6 @@ import SwiftUI
   let contexts = ContextAdapters()
   let organizationStore: OrganizationStore
   var onGame: (() -> Void)?
-  var onBringBack: (() -> Void)?
-  var onCapture: (() -> Void)?
-  var onRecoverPet: (() -> Void)?
   let store: PetStore
   private var monitor: SystemHealthMonitoring?
   private let brain: PetBrain = RuleBasedBrain()
@@ -177,7 +175,6 @@ import SwiftUI
     }
     contexts.refreshCalendar(selected: organization.consent.selectedCalendars)
     contexts.flush()
-    hub.tickUsage(organization.intervals)
     organization.intervals = ActivityPolicy.retained(
       organization.intervals, preferences: organization.consent, now: Date())
     for index in organization.sessions.indices
@@ -218,6 +215,8 @@ import SwiftUI
       definition.personality.dialogue[interaction.id] ?? [
         "A small moment, just for us.", "Happy to have you here.",
       ]
+    recentCare = Array((recentCare + [Date()]).filter { $0 > Date().addingTimeInterval(-86400) }.suffix(60))
+    UserDefaults.standard.set(recentCare, forKey: "recentCare")
     let line =
       lines.first { !companion.dialogueHistory.suffix(3).contains($0) } ?? lines.first ?? "Hello."
     message = line

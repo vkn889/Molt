@@ -22,15 +22,25 @@ Pet archives include only pet data, embedded species and optional sprite atlas. 
 
 ## Native presentation
 
-`PetController` is the main-actor source of truth. It owns the 60-second simulation/context tick and utility persistence. `AppDelegate` manages the floating panel, menu bar, dashboard, quick capture, game window, position recovery and a single-instance lock. All action surfaces call the same controller eligibility path.
+`PetController` is the main-actor source of truth. It owns the 60-second simulation/context tick and utility persistence. `AppDelegate` manages the menu bar item, the notch coordinator and a single-instance lock. All care actions go through the same controller eligibility path.
 
-`CreatureView` uses cached atlas frames and modest animation cadence. Animation stops for hidden/occluded surfaces, reduced motion and elevated thermal pressure. Pose choice is driven by explicit actions, active activities, sleep routine, context, then idle behavior. UI text uses the system San Francisco font.
+`CreatureView` draws Molt as a pixel grid with SwiftUI `Canvas`; see [art](art.md). `PetLife` turns care stats and recent play into a liveliness value that sets how far and how fast Molt wanders on Home and in Play. UI text uses the system San Francisco font.
 
 ## Notch
 
-`IslandCoordinator` owns one borderless panel pinned to the top center of the chosen display. The panel's header sits in the menu-bar band on either side of the hardware notch, and `NotchShape` draws the black silhouette with outward flares at the top and continuous rounded corners at the bottom. The window grows before content animates open and shrinks only after it animates closed. Hovering the notch opens Home without taking focus; moving away closes it unless a control inside became key. While music plays and Molt is closed, the panel stays at notch height with artwork on the left and a level meter on the right.
+`IslandCoordinator` owns one borderless panel pinned to the top center of the chosen display. Every page shares one size (`bodyHeight` below the menu-bar band). The header sits in the band on either side of the hardware notch, and `NotchShape` draws the black silhouette with outward flares at the top and continuous rounded corners at the bottom. The window grows before content animates open and shrinks only after it animates closed. Hovering the notch opens Home without taking focus; moving away closes it unless a control inside became key or a drag is in progress. While music plays and Molt is closed, the panel stays at notch height with artwork on the left and a level meter on the right.
 
-`NowPlayingController` follows Spotify and Apple Music. Track changes arrive through each player's distributed notification; AppleScript reads position and artwork and sends playback commands, only to a player that is already running. Position is polled every two seconds while the notch is open and interpolated between polls. Spotify artwork is fetched from Spotify's image CDN; Apple Music artwork is read from the app.
+Pages: Home (`NotchHomeView`), Hub (`HubView`), Play (`PlayView`), Claude Code & Codex (`SessionsView`), Chat (`PersonalChatView`) and Settings (`SettingsView`).
+
+## Music
+
+`NowPlayingController` follows Spotify and Apple Music. Track changes arrive through each player's distributed notification; AppleScript reads position and artwork and sends playback commands, only to a player that is already running. With a connected Spotify account and no local player, it follows Spotify Connect through the Web API instead. Position is polled every two seconds while the notch is open and interpolated between polls.
+
+`MusicLibrary` lists playlists. `SpotifyAccount` signs in with OAuth authorization code and PKCE, using a loopback listener on `127.0.0.1:43821` and a Client ID the user registers; tokens live in the keychain and refresh automatically. Playlists play through the desktop app launched hidden, or through the Web API on an active device. `AppleMusicLibrary` reads library playlists and their cover art from Music by AppleScript and plays them with Music hidden. Playlist references are validated before they reach a script.
+
+## Claude Code and Codex
+
+`AgentSessionParser` (core, tested) extracts only the conversation from Claude Code and Codex JSONL transcripts, skipping tool calls, injected context and internal reviewer runs. `SessionsController` indexes both folders off the main thread, caches by size and modification date, counts each token record once, and, when enabled, copies transcripts into Application Support so they outlive the tools' own cleanup. Limits: 3,000 files and 60 MB per file.
 
 ## Context and permissions
 

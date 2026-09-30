@@ -11,7 +11,7 @@ public struct HubScene: Codable, Identifiable {
     self.name = name; self.minutes = minutes; self.playlist = playlist; self.wallpaper = wallpaper; self.apps = apps
   }
 }
-public struct TokenRecord: Codable, Identifiable {
+public struct TokenRecord: Codable, Identifiable, Sendable {
   public var id: String
   public var date: Date
   public var tool: String

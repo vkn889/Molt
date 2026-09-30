@@ -2,108 +2,74 @@ import AppKit
 import MoltCore
 import SwiftUI
 
+/// Chat with Molt through Ollama on this Mac.
 struct PersonalChatView: View {
   @ObservedObject var assistant: AssistantController
-  var onSetup: () -> Void
-  @State private var showScreen = false
   @FocusState private var focused: Bool
   var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
-      if assistant.conversation.isEmpty {
-        Text("What’s on your mind?").font(MoltTheme.display(22))
-        Text("Talk something through, learn, plan, create, or share a screen for help.").font(
-          .callout
-        ).foregroundStyle(.secondary)
-      }
-      ForEach(Array(assistant.conversation.enumerated()), id: \.offset) { _, message in
-        VStack(alignment: .leading, spacing: 4) {
-          Text(message.role == "user" ? "You" : "Molt").font(.caption.bold()).foregroundStyle(
-            Color.accentColor)
-          Text(message.content).textSelection(.enabled)
-        }.frame(maxWidth: .infinity, alignment: .leading).padding(10)
-          .background(
-            Color.primary.opacity(message.role == "user" ? 0.08 : 0.03),
-            in: RoundedRectangle(cornerRadius: 12))
-      }
-      if !assistant.reply.isEmpty, assistant.running || assistant.conversation.last?.role == "user"
-      {
-        Text(assistant.reply).textSelection(.enabled)
-      }
-      TextField("Ask anything…", text: $assistant.draft, axis: .vertical).lineLimit(1...4)
-        .textFieldStyle(.roundedBorder).focused($focused).onSubmit { assistant.send() }
-      HStack {
-        Button {
-          showScreen.toggle()
-        } label: {
-          Label("Screen help", systemImage: "rectangle.dashed.badge.record")
+    VStack(spacing: 8) {
+      ScrollViewReader { reader in
+        ScrollView {
+          LazyVStack(alignment: .leading, spacing: 6) {
+            if assistant.conversation.isEmpty && assistant.reply.isEmpty {
+              Text(assistant.selectedModel.isEmpty ? "Connect Ollama to start chatting." : "Ask anything.")
+                .font(.system(size: 12)).foregroundStyle(.secondary).padding(.top, 6)
+            }
+            ForEach(Array(assistant.conversation.enumerated()), id: \.offset) { index, message in
+              bubble(message.content, user: message.role == "user").id(index)
+            }
+            if !assistant.reply.isEmpty, assistant.running || assistant.conversation.last?.role == "user" {
+              bubble(assistant.reply, user: false).id("reply")
+            }
+          }.frame(maxWidth: .infinity, alignment: .leading)
         }
-        Button("Attach text", action: assistant.chooseFile)
-        Button("New chat", action: assistant.newConversation)
-        Spacer()
+        .onChange(of: assistant.reply) { _ in reader.scrollTo("reply", anchor: .bottom) }
+        .onChange(of: assistant.conversation.count) { count in reader.scrollTo(count - 1, anchor: .bottom) }
+      }
+      HStack(spacing: 6) {
+        Button(action: assistant.chooseFile) { Image(systemName: "paperclip").font(.system(size: 12, weight: .semibold)) }
+          .buttonStyle(NotchIconButtonStyle(size: 28)).help(assistant.attachmentName.isEmpty ? "Attach a text file" : assistant.attachmentName)
+          .accessibilityLabel("Attach a text file")
+        TextField("Message Molt", text: $assistant.draft).textFieldStyle(.plain).font(.system(size: 12))
+          .focused($focused).onSubmit { assistant.send() }
+          .padding(.horizontal, 10).frame(height: 28)
+          .background(RoundedRectangle(cornerRadius: 14).fill(Color.white.opacity(0.08)))
+        if !assistant.attachmentName.isEmpty {
+          Button {
+            assistant.attachment = ""; assistant.attachmentName = ""; assistant.sharedImage = nil
+          } label: {
+            Label(assistant.attachmentName, systemImage: "xmark").font(.system(size: 10)).lineLimit(1).frame(maxWidth: 110)
+          }.buttonStyle(.plain).foregroundStyle(.secondary).help("Remove attachment")
+        }
         if assistant.selectedModel.isEmpty {
-          Button("Connect to Ollama", action: assistant.refresh)
+          Button("Connect Ollama", action: assistant.refresh)
         } else if assistant.running {
-          Button("Stop", action: assistant.cancel)
+          Button(action: assistant.cancel) { Image(systemName: "stop.fill").font(.system(size: 11, weight: .bold)) }
+            .buttonStyle(NotchIconButtonStyle(size: 28, prominent: true)).accessibilityLabel("Stop")
         } else {
-          Button("Send", action: assistant.send).disabled(assistant.draft.isEmpty)
+          Button { assistant.send() } label: { Image(systemName: "arrow.up.circle.fill").font(.system(size: 22)) }
+            .buttonStyle(NotchIconButtonStyle(size: 28, prominent: true)).foregroundStyle(Color.accentColor)
+            .disabled(assistant.draft.isEmpty).accessibilityLabel("Send")
         }
-      }.font(.caption)
-      if !assistant.attachmentName.isEmpty {
-        HStack {
-          Label(assistant.attachmentName, systemImage: "paperclip").font(.caption)
-          if assistant.sharedImage != nil { Text("Image shared with next message").font(.caption) }
-          Button("Remove") {
-            assistant.attachment = ""
-            assistant.attachmentName = ""
-            assistant.sharedImage = nil
-          }
-        }
+        Button(action: assistant.newConversation) { Image(systemName: "square.and.pencil").font(.system(size: 12, weight: .semibold)) }
+          .buttonStyle(NotchIconButtonStyle(size: 28)).help("New chat").accessibilityLabel("New chat")
       }
-      Text(assistant.status).font(.caption2).foregroundStyle(.secondary)
-      if showScreen { ScreenHelpView(help: assistant.screenHelp, assistant: assistant) }
-    }.onAppear { focused = true }
+      if !assistant.status.isEmpty && assistant.selectedModel.isEmpty {
+        Text(assistant.status).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
+          .frame(maxWidth: .infinity, alignment: .leading)
+      }
+    }
+    .padding(.horizontal, 22).padding(.top, 8).padding(.bottom, 12)
+    .onAppear { focused = true }
   }
-}
-struct ScreenHelpView: View {
-  @ObservedObject var help: ScreenHelp
-  @ObservedObject var assistant: AssistantController
-  var body: some View {
-    VStack(alignment: .leading, spacing: 10) {
-      Text("Share your screen, only when you choose").font(.headline)
-      Text(
-        "macOS will request Screen Recording permission. One frame is captured, excluding Molt. Review it before sharing with a local model. No continuous monitoring or cloud upload."
-      ).font(.caption)
-      HStack {
-        Picker("Display", selection: $help.displayIndex) {
-          ForEach(Array(NSScreen.screens.enumerated()), id: \.offset) { index, screen in
-            Text(screen.localizedName).tag(index)
-          }
-        }
-        Button("Capture once", action: help.capture).disabled(help.busy)
-        Button("Attach screenshot", action: help.chooseImage).disabled(help.busy)
-      }
-      Text(help.status).font(.caption)
-      if let image = help.preview {
-        Image(nsImage: image).resizable().scaledToFit().frame(maxHeight: 140).accessibilityLabel(
-          "Screenshot preview. Check for private information before sharing.")
-        HStack {
-          Button("Use image in next message") { assistant.shareScreen(asImage: true) }
-          Button("Use extracted text") { assistant.shareScreen(asImage: false) }.disabled(
-            help.recognizedText.isEmpty)
-          Button("Discard") {
-            help.clear()
-            assistant.sharedImage = nil
-            assistant.attachment = ""
-            assistant.attachmentName = ""
-          }
-        }.font(.caption)
-        DisclosureGroup("Preview extracted text") {
-          Text(help.recognizedText).font(.caption).textSelection(.enabled)
-        }
-        Text(
-          "Use extracted text for reliable screen help. Image support depends on your connected Ollama service."
-        ).font(.caption2).foregroundStyle(.secondary)
-      }
-    }.padding(12).background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
+  private func bubble(_ text: String, user: Bool) -> some View {
+    HStack {
+      if user { Spacer(minLength: 80) }
+      Text(text).font(.system(size: 12)).textSelection(.enabled)
+        .padding(.horizontal, 10).padding(.vertical, 6)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(user ? Color.accentColor.opacity(0.85) : Color.white.opacity(0.08)))
+        .foregroundStyle(.white)
+      if !user { Spacer(minLength: 80) }
+    }
   }
 }

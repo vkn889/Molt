@@ -2,25 +2,31 @@
 
 A little companion. Your whole Mac, a little closer.
 
-Molt is a native macOS notch companion with pixel-art personality, a retro interface, and practical everyday controls. Customize your creature, arrange your hub, control music, check the weather, settle into a focus session, and chat with a local helper.
+Molt is a native macOS notch companion with a clean, Apple-style interface, a pixel-art creature, and practical everyday controls. See what's playing, glance at your week and your Mac's health, arrange your hub, check the weather, settle into a focus session, and chat with a local helper.
 
-![Molt companion hub](docs/screenshots/companion-hub.png)
+![Molt notch home](docs/screenshots/notch-home.png)
 
-## Open your hub
+## Open the notch
 
-Launch Molt, then press **Command-Shift-Enter**. The panel expands from the notch and retracts with the same shortcut. Escape dismisses navigation first, then hides Molt. The top edge meets the screen without a rounded gap; the lower corners remain rounded.
+Hover over the notch, or press **Command-Shift-Enter**, and Molt expands from it. Move the pointer away (or press the shortcut again) to close it. Escape closes the menu first, then Molt. Hover-to-open can be turned off from the **•••** menu.
 
-The interface uses pixel-edged controls, a warm console-inspired palette, and the groovy **Shrikhand** display font. Reduced-motion preferences disable interaction movement. The companion remains pixel art with nearest-neighbor rendering. This is a retro visual style; the packaged application is a native 64-bit Apple Silicon / Intel app.
+The panel is pure black and meets the top of the screen with small outward flares, like the notch itself; the lower corners are continuously rounded. Home and Hub tabs sit left of the notch; Chat, Search, Capture and the menu sit to its right. Text uses San Francisco, and reduced-motion preferences disable interface movement. The companion remains pixel art.
+
+**Home** shows:
+
+- **Now playing** from Spotify or Apple Music, detected automatically: artwork, title, album, artist, a draggable progress bar and playback controls. While music plays and Molt is closed, the artwork and a level meter sit either side of the notch.
+- **Your week:** a five-day strip with today highlighted, dots on days with events, and today's events or priorities.
+- **Mac health:** battery, CPU, memory, storage and your companion's care level.
 
 ## A companion and a control center
 
 - **Companion:** care, moods, tricks, short games, outfits, colors, accessories, and home customization. Click the creature to customize its home and wardrobe.
 - **Today:** your next priority, selected calendar events, reminders, and focus controls.
-- **Music:** Music or Spotify playback controls, refreshable track information, volume, and favorite playlist links. macOS requests Automation permission when needed. Playlist links open their service; autoplay depends on that service.
+- **Music:** Home follows whichever of Spotify or Apple Music is playing. macOS asks once for Automation permission. Molt never launches a player itself. Spotify artwork is loaded from Spotify's image servers. The Hub's **Playlists & volume** card keeps system volume and favorite playlist links; autoplay depends on the service.
 - **Weather:** search for a city, choose the correct result, and fetch current modeled conditions. Powered by [Open-Meteo](https://open-meteo.com/) under CC BY 4.0. Only your search and selected coordinates go to the weather service.
 - **My Mac:** save wallpaper favorites, apply one to current desktops, and restore the prior wallpaper during the session. Change Dock position, auto-hide, and icon size. Dock controls apply immediately and restart the Dock; they do not install custom skins.
 - **Scenes:** save a combination of selected apps, a favorite playlist, wallpaper, and focus duration. Review the exact actions before running a scene. Existing focus sessions are preserved. App and playlist opening cannot guarantee playback or restore prior app state.
-- **Arrange:** show, hide, and reorder hub cards.
+- **Arrange:** show, hide, and reorder Hub cards.
 
 ## Local helper
 
@@ -48,21 +54,21 @@ Requires macOS 13+, Swift 5.9+, and full Xcode for universal builds and XCTest.
 ```sh
 swift run Molt
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --scratch-path .build-xcode
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer ./scripts/package.sh 0.5.0
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer ./scripts/package.sh 0.6.0
 open dist/Molt.app
 ```
 
-The package script produces `dist/Molt-0.5.0.dmg` and an ad-hoc signed universal app. Ad-hoc signing is not Apple notarization. Set `MOLT_UNIVERSAL=0` for a host-only development build.
+The package script produces `dist/Molt-0.6.0.dmg` and an ad-hoc signed universal app. Ad-hoc signing is not Apple notarization. Set `MOLT_UNIVERSAL=0` for a host-only development build.
 
 ## Privacy and permissions
 
-No background screen capture, clipboard collection, or keystroke recording. Calendar, notifications, screen capture, app observation, and local AI usage imports have separate controls. Media automation requests macOS permission only after a media action. Weather and web search contact their respective services when requested. Local chat and imported usage stay on the Mac.
+No background screen capture, clipboard collection, or keystroke recording. Calendar, notifications, screen capture, app observation, and local AI usage imports have separate controls. Media automation requests macOS permission the first time Molt reads Spotify or Apple Music, and only for a player that is already running. Weather and web search contact their respective services when requested. Local chat and imported usage stay on the Mac.
 
 ## Development references
 
 - [Architecture](docs/architecture.md)
 - [Companion definitions](docs/definitions.md)
 - [Release scope](docs/release-scope.md)
-- [0.4.2 release notes](docs/releases/0.4.2.md)
+- [0.6.0 release notes](docs/releases/0.6.0.md)
 
-Shrikhand is distributed under the SIL Open Font License; its license is bundled with the font. Historical model/runtime tooling remains in the repository for compatibility and development, outside the current user interface.
+Historical model/runtime tooling remains in the repository for compatibility and development, outside the current user interface.

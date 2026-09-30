@@ -24,7 +24,13 @@ Pet archives include only pet data, embedded species and optional sprite atlas. 
 
 `PetController` is the main-actor source of truth. It owns the 60-second simulation/context tick and utility persistence. `AppDelegate` manages the floating panel, menu bar, dashboard, quick capture, game window, position recovery and a single-instance lock. All action surfaces call the same controller eligibility path.
 
-`CreatureView` uses cached atlas frames and modest animation cadence. Animation stops for hidden/occluded surfaces, reduced motion and elevated thermal pressure. Pose choice is driven by explicit actions, active activities, sleep routine, context, then idle behavior. UI text uses local Oxanium headings and native body fonts.
+`CreatureView` uses cached atlas frames and modest animation cadence. Animation stops for hidden/occluded surfaces, reduced motion and elevated thermal pressure. Pose choice is driven by explicit actions, active activities, sleep routine, context, then idle behavior. UI text uses the system San Francisco font.
+
+## Notch
+
+`IslandCoordinator` owns one borderless panel pinned to the top center of the chosen display. The panel's header sits in the menu-bar band on either side of the hardware notch, and `NotchShape` draws the black silhouette with outward flares at the top and continuous rounded corners at the bottom. The window grows before content animates open and shrinks only after it animates closed. Hovering the notch opens Home without taking focus; moving away closes it unless a control inside became key. While music plays and Molt is closed, the panel stays at notch height with artwork on the left and a level meter on the right.
+
+`NowPlayingController` follows Spotify and Apple Music. Track changes arrive through each player's distributed notification; AppleScript reads position and artwork and sends playback commands, only to a player that is already running. Position is polled every two seconds while the notch is open and interpolated between polls. Spotify artwork is fetched from Spotify's image CDN; Apple Music artwork is read from the app.
 
 ## Context and permissions
 

@@ -16,8 +16,7 @@ import SwiftUI
   }
   @Published var saved = Saved()
   @Published var status = "Your little Mac hub."
-  @Published var music = "Connect Music or Spotify when you choose."
-  @Published var musicApp = "Music"
+  let media = NowPlayingController()
   @Published var city = ""
   @Published var places: [Place] = []
   @Published var weather = "Choose a city to check the weather."
@@ -53,22 +52,18 @@ import SwiftUI
   func toggleCard(_ card: String) {
     if saved.cards.contains(card) { saved.cards.removeAll { $0 == card } } else { saved.cards.append(card) }; save()
   }
-  func player(_ action: String) {
-    let target = musicApp == "Spotify" ? "Spotify" : "Music"
-    let allowed = ["playpause", "next track", "previous track", "status"]
-    guard allowed.contains(action) else { return }
-    let command = action == "status" ? "if player state is playing then\nreturn name of current track & \" · \" & artist of current track\nelse\nreturn \"Playback paused\"\nend if" : action
-    runScript("tell application \"\(target)\"\n\(command)\nend tell") { self.music = $0.isEmpty ? "Playback command sent. Refresh to see the current track." : $0 }
-  }
   private func runScript(_ source: String, completion: @escaping (String) -> Void) {
     guard !busy else { return }; busy = true
-    // This work runs only after an explicit control click. macOS manages Automation permission.
+    // Runs only after an explicit control change. macOS manages Automation permission.
     DispatchQueue.global(qos: .userInitiated).async {
       var error: NSDictionary?
       let value = NSAppleScript(source: source)?.executeAndReturnError(&error)
       let text = error.map { "Automation unavailable: \($0[NSAppleScript.errorMessage] ?? "Permission denied")" } ?? value?.stringValue ?? ""
       Task { @MainActor in self.busy = false; completion(text) }
     }
+  }
+  func readVolume(_ completion: @escaping (Int) -> Void) {
+    runScript("output volume of (get volume settings)") { if let value = Int($0) { completion(value) } }
   }
   func volume(_ value: Int) {
     runScript("set volume output volume \(min(100, max(0, value)))") { self.status = $0.isEmpty ? "Volume changed." : $0 }

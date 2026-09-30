@@ -87,7 +87,8 @@ struct CompanionView: View {
                 .font(.caption).foregroundStyle(.secondary)
             }
             switch controller.tab {
-            case "Notch": HubView(controller: controller, hub: controller.hub)
+            case "Notch": NotchHomeView(controller: controller, media: controller.hub.media)
+            case "Hub": HubView(controller: controller, hub: controller.hub)
             case "Ask Molt":
               PersonalChatView(
                 assistant: controller.assistant, onSetup: { controller.tab = "AI & tools" })
@@ -142,7 +143,7 @@ struct AdoptionView: View {
             $0.adoptionComplete = true
             $0.remember("Our first day together.", kind: "adoption", at: Date())
           }
-        }.buttonStyle(RetroButtonStyle()).tint(MoltTheme.green)
+        }.buttonStyle(NotchButtonStyle()).tint(MoltTheme.green)
       }
       Button("Skip for now") { controller.changeCompanion { $0.adoptionComplete = true } }.font(
         .caption)
@@ -218,7 +219,7 @@ struct TodayView: View {
             Text("50 minutes").tag(50)
           }
           Button("Start focus") { controller.focus(minutes: minutes, task: selectedTask) }
-            .buttonStyle(RetroButtonStyle()).tint(MoltTheme.green)
+            .buttonStyle(NotchButtonStyle()).tint(MoltTheme.green)
         }
         Picker("Work on", selection: $selectedTask) {
           Text("Open focus").tag(nil as UUID?)

@@ -1,9 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-VERSION="${1:-0.5.0}"
+VERSION="${1:-0.6.0}"
 if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$ ]]; then
-  echo 'Expected a version such as 0.5.0' >&2
+  echo 'Expected a version such as 0.6.0' >&2
   exit 1
 fi
 BUILD_ARGS=(-c release)
@@ -31,7 +31,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <key>CFBundleVersion</key><string>$VERSION</string>
 <key>LSMinimumSystemVersion</key><string>13.0</string>
 <key>LSUIElement</key><true/>
-<key>NSAppleEventsUsageDescription</key><string>Molt controls Music, Spotify and volume only when you choose a media control.</string>
+<key>NSAppleEventsUsageDescription</key><string>Molt shows what is playing in Spotify or Apple Music and controls playback and volume from the notch.</string>
 <key>NSHighResolutionCapable</key><true/>
 <key>NSCalendarsUsageDescription</key><string>Molt reads only the calendars you choose to show upcoming commitments. It never edits events.</string>
 <key>NSCalendarsFullAccessUsageDescription</key><string>Molt reads only selected calendars for your Today dashboard. It never creates or edits events.</string>

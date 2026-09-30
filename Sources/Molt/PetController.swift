@@ -123,6 +123,11 @@ import SwiftUI
       self, selector: #selector(woke), name: NSWorkspace.didWakeNotification, object: nil)
   }
   @objc private func woke() { tick() }
+  /// Samples Mac health for display only; care effects still apply once per tick.
+  func refreshHealth() {
+    guard healthEnabled, let monitor else { return }
+    health = monitor.currentSnapshot()
+  }
   func tick(event: String? = nil) {
     let now = self.now
     assistant.checkRituals(at: now)

@@ -20,6 +20,17 @@ final class InferenceTests: XCTestCase {
       small.contains(
         IslandGeometry.frame(screen: small, visible: small, safeTop: 0, expanded: true)))
   }
+  func testNotchPanelSizesAnchorToTopCenter() {
+    let screen = CGRect(x: 0, y: 0, width: 1512, height: 982)
+    let visible = CGRect(x: 0, y: 0, width: 1512, height: 945)
+    let home = IslandGeometry.frame(screen: screen, visible: visible, size: CGSize(width: 748, height: 170))
+    XCTAssertEqual(home.maxY, screen.maxY)
+    XCTAssertEqual(home.midX, screen.midX)
+    XCTAssertEqual(home.size, CGSize(width: 748, height: 170))
+    let tiny = CGRect(x: 0, y: 0, width: 400, height: 300)
+    let clamped = IslandGeometry.frame(screen: tiny, visible: tiny, size: CGSize(width: 900, height: 900))
+    XCTAssertTrue(tiny.contains(clamped))
+  }
   func testRejectsRemoteAndEmbeddingModels() throws {
     XCTAssertThrowsError(
       try OllamaProvider.validateMetadata(

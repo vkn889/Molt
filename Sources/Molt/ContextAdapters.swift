@@ -1,4 +1,5 @@
 import AppKit
+import CoreGraphics
 import EventKit
 import MoltCore
 import UserNotifications
@@ -61,7 +62,9 @@ import UserNotifications
     observed = nil
     if consent.tracking && !consent.paused && now > old.start {
       // Bound a missed lifecycle callback instead of attributing an entire sleep gap.
-      let end = min(now, old.start.addingTimeInterval(90))
+      let idle = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: CGEventType(rawValue: UInt32.max)!)
+      let activeEnd = idle > 120 ? now.addingTimeInterval(-(idle - 120)) : now
+      let end = max(old.start, min(activeEnd, old.start.addingTimeInterval(90)))
       interval?(
         ActivityInterval(
           app: old.id, name: old.name, start: old.start, end: end,

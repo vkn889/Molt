@@ -26,8 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       let controller = try PetController()
       self.controller = controller
       status = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-      status?.button?.image = NSImage(
-        systemSymbolName: "leaf", accessibilityDescription: "Molt companion")
+      status?.button?.image = MoltIcon.menuBarImage()
       controller.onChange = { [weak self] in self?.rebuildMenu() }
       controller.onGame = { [weak self] in self?.show("Play") }
       island = IslandCoordinator(controller: controller)
@@ -138,6 +137,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
       }
       app.run()
+      return
+    }
+    if let index = CommandLine.arguments.firstIndex(of: "--render-iconset"),
+      CommandLine.arguments.count > index + 1
+    {
+      do { try MoltIcon.writeIconset(to: URL(fileURLWithPath: CommandLine.arguments[index + 1])) } catch {
+        fputs("Icon failed: \(error)\n", stderr)
+        exit(1)
+      }
       return
     }
     if let index = CommandLine.arguments.firstIndex(of: "--render-preview"),

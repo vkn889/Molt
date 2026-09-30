@@ -19,11 +19,17 @@ cp "$BIN_DIR/Molt" "$APP/Contents/MacOS/Molt"
 for RESOURCE in "$BIN_DIR"/*.bundle; do
   if [[ -d "$RESOURCE" ]]; then cp -R "$RESOURCE" "$APP/Contents/Resources/"; fi
 done
+# The app icon is drawn by Molt itself from the same pixel grid as the creature.
+ICONSET="$ASSEMBLY/AppIcon.iconset"
+"$BIN_DIR/Molt" --render-iconset "$ICONSET"
+iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
+rm -rf "$ICONSET"
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>CFBundleExecutable</key><string>Molt</string>
+<key>CFBundleIconFile</key><string>AppIcon</string>
 <key>CFBundleIdentifier</key><string>app.molt.companion</string>
 <key>CFBundleName</key><string>Molt</string>
 <key>CFBundlePackageType</key><string>APPL</string>

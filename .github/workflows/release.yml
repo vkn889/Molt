@@ -16,7 +16,14 @@ jobs:
         env:
           TAG: ${{ github.ref_name }}
         run: ./scripts/package.sh "${TAG#v}"
+      - name: Release notes
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          notes="docs/releases/${TAG#v}.md"
+          if [ ! -f "$notes" ]; then notes="$RUNNER_TEMP/notes.md"; echo "Molt ${TAG#v}" > "$notes"; fi
+          echo "NOTES=$notes" >> "$GITHUB_ENV"
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*.dmg
-          generate_release_notes: true
+          body_path: ${{ env.NOTES }}

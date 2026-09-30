@@ -8,23 +8,19 @@ extension EnvironmentValues {
     set { self[MoltReducedMotionKey.self] = newValue }
   }
 }
-struct GlassSurface: View {
+struct RetroSurface: View {
   @Environment(\.colorScheme) private var scheme
   @Environment(\.accessibilityReduceTransparency) private var solid
   var radius: CGFloat = 16
   var body: some View {
-    RoundedRectangle(cornerRadius: radius)
-      .fill(.regularMaterial)
-      .overlay(RoundedRectangle(cornerRadius: radius).fill(
-        scheme == .dark ? Color.black.opacity(solid ? 1 : 0.30) : Color.white.opacity(solid ? 1 : 0.58)))
-      .overlay(RoundedRectangle(cornerRadius: radius).fill(LinearGradient(
-        colors: [.white.opacity(scheme == .dark ? 0.12 : 0.45), .clear, Color.accentColor.opacity(0.06)],
-        startPoint: .topLeading, endPoint: .bottomTrailing)))
-      .overlay(RoundedRectangle(cornerRadius: radius).strokeBorder(
-        LinearGradient(colors: [.white.opacity(0.30), Color.primary.opacity(0.08)], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 0.7))
+    PixelPanel()
+      .fill(scheme == .dark ? Color(red: 0.16, green: 0.13, blue: 0.25) : Color(red: 1, green: 0.96, blue: 0.86))
+      .overlay(PixelPanel().stroke(Color.primary.opacity(0.35), lineWidth: 2))
+      .overlay(PixelPanel().inset(by: 3).stroke(Color.white.opacity(0.15), lineWidth: 1))
+
   }
 }
-struct GlassButtonStyle: ButtonStyle {
+struct RetroButtonStyle: ButtonStyle {
   func makeBody(configuration: Configuration) -> some View { GlassButton(configuration: configuration) }
   private struct GlassButton: View {
     let configuration: Configuration
@@ -33,12 +29,12 @@ struct GlassButtonStyle: ButtonStyle {
     @Environment(\.moltReducedMotion) private var reduced
     @Environment(\.accessibilityReduceMotion) private var systemReduced
     var body: some View {
-      configuration.label.font(.system(size: 12, weight: .semibold))
+      configuration.label.font(MoltTheme.display(13))
         .padding(.horizontal, 12).padding(.vertical, 8)
-        .contentShape(RoundedRectangle(cornerRadius: 11))
-        .background(GlassSurface(radius: 11))
-        .overlay(RoundedRectangle(cornerRadius: 11).fill(Color.accentColor.opacity(hovered && enabled ? 0.14 : 0)))
-        .overlay(RoundedRectangle(cornerRadius: 11).strokeBorder(Color.accentColor.opacity(hovered && enabled ? 0.5 : 0), lineWidth: 1))
+        .contentShape(PixelPanel())
+        .background(RetroSurface(radius: 11))
+        .overlay(PixelPanel().fill(Color.accentColor.opacity(hovered && enabled ? 0.14 : 0)))
+        .overlay(PixelPanel().strokeBorder(Color.accentColor.opacity(hovered && enabled ? 0.5 : 0), lineWidth: 1))
         .opacity(enabled ? 1 : 0.42)
         .scaleEffect(configuration.isPressed && !reduced && !systemReduced ? 0.96 : 1)
         .animation(reduced || systemReduced ? nil : .easeOut(duration: 0.18), value: hovered)
@@ -47,7 +43,7 @@ struct GlassButtonStyle: ButtonStyle {
     }
   }
 }
-struct GlassNavigation: View {
+struct RetroNavigation: View {
   @Binding var selection: String
   @Binding var theme: String
   @Binding var accent: String
@@ -59,10 +55,10 @@ struct GlassNavigation: View {
   @Environment(\.accessibilityReduceMotion) private var systemReduced
   private var routes: [(String, String, String)] {
     switch category {
-    case "Daily": return [("Notch", "Quick controls", "square.grid.2x2"), ("Today", "Today & focus", "sun.max"), ("Library", "Tasks & notes", "tray.full"), ("Capture", "Quick capture", "plus.circle"), ("AI & tools", "Projects & tools", "folder")]
-    case "Companion": return [("Molt", "Care & training", "heart"), ("Play", "Play together", "gamecontroller"), ("Home", "Home & wardrobe", "house"), ("Activity", "Computer health", "waveform.path.ecg")]
-    case "Settings": return [("Settings", "Preferences", "slider.horizontal.3"), ("AI & tools", "Local AI setup", "cpu")]
-    default: return [("Ask Molt", "Chat with Molt", "bubble.left.and.bubble.right"), ("Molting", "Search & research", "globe"), ("Agent", "Tasks, memory & history", "sparkles")]
+    case "Daily": return [("Notch", "My Mac hub", "square.grid.2x2"), ("Today", "Today & focus", "sun.max"), ("Library", "Tasks & notes", "tray.full"), ("Capture", "Quick capture", "plus.circle")]
+    case "Companion": return [("Molt", "Care & training", "heart"), ("Play", "Play together", "gamecontroller"), ("Home", "Home & wardrobe", "house")]
+    case "Settings": return [("Settings", "Preferences", "slider.horizontal.3"), ("AI & tools", "Connect Ollama", "cpu"), ("Agent", "Memory & recent actions", "clock")]
+    default: return [("Notch", "My companion hub", "house"), ("Ask Molt", "Chat with Molt", "bubble.left.and.bubble.right"), ("Molting", "Search & explore", "globe")]
     }
   }
   var body: some View {
@@ -113,14 +109,14 @@ struct GlassNavigation: View {
           }
         }.padding(2)
       }
-    }.padding(12).background(GlassSurface(radius: 18))
+    }.padding(12).background(RetroSurface(radius: 18))
       .shadow(color: .black.opacity(0.3), radius: 18, y: 8)
-      .buttonStyle(GlassButtonStyle())
+      .buttonStyle(RetroButtonStyle())
       .animation(reduced || systemReduced ? nil : .easeInOut(duration: 0.2), value: category)
   }
 }
 
-struct GlassPageMotion: ViewModifier {
+struct RetroPageMotion: ViewModifier {
   var route: String
   @State private var visible = true
   @Environment(\.moltReducedMotion) private var reduced
@@ -137,5 +133,20 @@ struct GlassPageMotion: ViewModifier {
         do { try await Task.sleep(nanoseconds: 20_000_000) } catch { return }
         withAnimation(.easeOut(duration: 0.24)) { visible = true }
       }
+  }
+}
+
+struct PixelPanel: InsettableShape {
+  var insetAmount: CGFloat = 0
+  func inset(by amount: CGFloat) -> PixelPanel { var shape = self; shape.insetAmount += amount; return shape }
+  func path(in original: CGRect) -> Path {
+    let r = original.insetBy(dx: insetAmount, dy: insetAmount)
+    let c: CGFloat = min(5, min(r.width, r.height) / 3)
+    return Path { p in
+      p.move(to: CGPoint(x: r.minX + c, y: r.minY))
+      let points = [CGPoint(x: r.maxX - c, y: r.minY), CGPoint(x: r.maxX - c, y: r.minY + c), CGPoint(x: r.maxX, y: r.minY + c), CGPoint(x: r.maxX, y: r.maxY - c), CGPoint(x: r.maxX - c, y: r.maxY - c), CGPoint(x: r.maxX - c, y: r.maxY), CGPoint(x: r.minX + c, y: r.maxY), CGPoint(x: r.minX + c, y: r.maxY - c), CGPoint(x: r.minX, y: r.maxY - c), CGPoint(x: r.minX, y: r.minY + c), CGPoint(x: r.minX + c, y: r.minY + c)]
+      for point in points { p.addLine(to: point) }
+      p.closeSubpath()
+    }
   }
 }

@@ -20,29 +20,7 @@ struct AssistantView: View {
       Text(
         "Your words stay on this Mac. Only the text and project memory you select below are supplied to the model."
       ).font(.callout)
-      Picker("AI provider", selection: $assistant.providerKind) {
-        Text("Managed local").tag("managed")
-        Text("Ollama (advanced)").tag("ollama")
-      }.disabled(assistant.running).onChange(of: assistant.providerKind) { _ in
-        assistant.models = []
-        assistant.selectedModel = ""
-      }
-      if assistant.providerKind == "managed" {
-        ManagedModelView(manager: assistant.modelManager, inferenceRunning: assistant.running)
-      }
-      HStack {
-        Button("Connect / refresh", action: assistant.refresh).disabled(assistant.running)
-        Picker("Local model", selection: $assistant.selectedModel) {
-          Text("Choose model").tag("")
-          ForEach(assistant.models) { model in
-            Text(
-              "\(model.id) · \(ByteCountFormatter.string(fromByteCount: model.bytes, countStyle: .file))"
-            ).tag(model.id)
-          }
-        }.disabled(assistant.running)
-        Button("Unload", action: assistant.unload).disabled(
-          assistant.running || assistant.selectedModel.isEmpty)
-      }
+      Button("Connect to Ollama", action: assistant.refresh).disabled(assistant.running)
       Text(assistant.status).font(.caption).accessibilityLabel("AI status: \(assistant.status)")
       if let error = assistant.storageError { Text(error).foregroundStyle(.red) }
       TextField(

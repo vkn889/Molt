@@ -288,7 +288,8 @@ enum BackgroundApp {
         let items = query?.queryItems ?? []
         let code = items.first { $0.name == "code" }?.value
         let returnedState = items.first { $0.name == "state" }?.value
-        Task { @MainActor [weak self] in self?.finish(code: code, state: returnedState) }
+        let owner = self
+        Task { @MainActor in owner?.finish(code: code, state: returnedState) }
       }
     }
     listener.start(queue: .main)

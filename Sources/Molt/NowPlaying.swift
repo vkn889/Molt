@@ -201,16 +201,17 @@ import SwiftUI
         case .failure(let failure): denied = denied || failure.permission
         }
       }
+      let found = snapshots, refused = denied
       Task { @MainActor in
         self.refreshing = false
-        self.permissionNeeded = denied && snapshots.isEmpty
+        self.permissionNeeded = refused && found.isEmpty
         let chosen =
-          snapshots.first { $0.1.playing }
-          ?? snapshots.first { $0.0 == current }
-          ?? snapshots.first
+          found.first { $0.1.playing }
+          ?? found.first { $0.0 == current }
+          ?? found.first
         // Without Automation access, keep whatever the players' own notifications reported.
         guard let (source, snapshot) = chosen else {
-          if !denied { self.refreshing = true; self.refreshRemote() }
+          if !refused { self.refreshing = true; self.refreshRemote() }
           return
         }
         self.apply(snapshot, from: source)

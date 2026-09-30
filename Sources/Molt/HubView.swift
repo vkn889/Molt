@@ -150,6 +150,10 @@ struct UsageHubView: View {
       Text("Reads numeric usage from ~/.claude/projects and ~/.codex/sessions. Prompts are not retained or sent anywhere. Process-running time can overlap with app time and does not measure attention.").font(.caption)
       Button("Refresh token records") { hub.importUsage() }.disabled(!hub.saved.usageConsent || hub.importBusy)
       Text(hub.importStatus).font(.caption)
+      let processTimes = UsageMath.seconds(hub.saved.cliIntervals, from: start, to: Date())
+      ForEach(processTimes.keys.sorted(), id: \.self) { tool in
+        Text("\(tool) today: \(Int((processTimes[tool] ?? 0) / 60)) min observed running").font(.caption)
+      }
       ForEach(["Claude Code", "Codex"], id: \.self) { tool in
         let records = hub.tokens.filter { $0.tool == tool && $0.date >= start }
         Text("\(tool) today: \(records.reduce(0) { $0 + $1.input + $1.cached + $1.output }) imported tokens").font(.caption)

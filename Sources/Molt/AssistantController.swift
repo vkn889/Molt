@@ -80,7 +80,7 @@ import SwiftUI
     generation = Task {
       defer { if requestID == id { running = false } }
       do {
-        let available = try await provider.models()
+        let available = try await ollama.compatibleModels()
         guard requestID == id else { return }
         models = available
         if !models.contains(where: { $0.id == selectedModel }) {

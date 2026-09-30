@@ -392,7 +392,7 @@ struct QuickCaptureView: View {
       : AnyView(CompanionView(controller: controller))
     let view = NSHostingView(rootView: rootView)
     let frame = NSRect(
-      x: 0, y: 0, width: islandPreview ? 740 : 1030, height: islandPreview ? 292 : 780)
+      x: 0, y: 0, width: islandPreview ? 740 : 1030, height: islandPreview ? 412 : 780)
     let window = NSWindow(
       contentRect: frame, styleMask: [.borderless], backing: .buffered, defer: false)
     window.contentView = view

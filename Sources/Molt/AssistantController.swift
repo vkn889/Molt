@@ -13,7 +13,7 @@ import SwiftUI
   @Published var sharedImage: Data?
   let screenHelp = ScreenHelp()
   let molting = MoltingController()
-  @Published var status = "AI is optional. Choose a local provider and connect when you are ready."
+  @Published var status = "Connect to Ollama when you are ready to chat."
   @Published var running = false
   @Published var attachment = ""
   @Published var attachmentName = ""
@@ -27,10 +27,10 @@ import SwiftUI
   @Published var storageError: String?
   let fileOrganizer: FileOrganizer
   let modelManager: ModelManager
-  @Published var providerKind = "managed"
+  @Published var providerKind = "ollama"
   private let ollama = OllamaProvider()
   private var provider: any InferenceProvider {
-    providerKind == "managed" ? modelManager.provider : ollama
+    ollama
   }
   private var generation: Task<Void, Never>?
   private var requestID = UUID()
@@ -76,11 +76,11 @@ import SwiftUI
     let id = UUID()
     requestID = id
     running = true
-    status = "Connecting to the selected local provider…"
+    status = "Connecting to Ollama…"
     generation = Task {
       defer { if requestID == id { running = false } }
       do {
-        let available = try await provider.models()
+        let available = try await ollama.compatibleModels()
         guard requestID == id else { return }
         models = available
         if !models.contains(where: { $0.id == selectedModel }) {
@@ -88,7 +88,7 @@ import SwiftUI
         }
         status =
           models.isEmpty
-          ? "No local models installed." : "Local provider connected. Ready for a request."
+          ? "Ollama needs its local model installed before connecting." : "Ollama connected. Ready to help."
       } catch { if requestID == id { status = error.localizedDescription } }
     }
   }

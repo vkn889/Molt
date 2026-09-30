@@ -71,6 +71,19 @@ public final class OllamaProvider: InferenceProvider, @unchecked Sendable {
     }
     return data
   }
+  public func compatibleModels() async throws -> [LocalModel] {
+    let installed = try await models()
+    var compatible: [LocalModel] = []
+    for model in installed.prefix(20) {
+      try Task.checkCancellation()
+      let body = try JSONSerialization.data(withJSONObject: ["model": model.id])
+      do {
+        try Self.validateMetadata(await data("show", body: body), name: model.id)
+        compatible.append(model)
+      } catch is CancellationError { throw CancellationError() } catch { continue }
+    }
+    return compatible
+  }
   public func models() async throws -> [LocalModel] {
     struct Listing: Decodable {
       struct Entry: Decodable {

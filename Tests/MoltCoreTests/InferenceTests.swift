@@ -13,7 +13,7 @@ final class InferenceTests: XCTestCase {
       XCTAssertTrue(screen.contains(frame))
       XCTAssertEqual(frame.maxY, screen.maxY)
       XCTAssertEqual(frame.midX, screen.midX)
-      if expanded { XCTAssertEqual(frame.height, 292) }
+      if expanded { XCTAssertEqual(frame.height, 412) }
     }
     let small = CGRect(x: 100, y: 100, width: 600, height: 500)
     XCTAssertTrue(

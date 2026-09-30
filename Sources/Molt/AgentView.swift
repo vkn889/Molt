@@ -10,12 +10,12 @@ struct AgentView: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
       Text("Task mode").font(MoltTheme.display(22))
-      Text("Describe a goal. Molt can prepare independent tasks, notes and focus sessions. Review each step before it runs. File organization remains in AI & tools.").font(.caption)
+      Text("Describe a goal. Molt can prepare independent tasks, notes and focus sessions. Review each step before it runs. ").font(.caption)
       TextField("What would you like to accomplish?", text: $assistant.draft, axis: .vertical)
       HStack {
         Button("Prepare plan", action: assistant.planTask).disabled(assistant.running || assistant.selectedModel.isEmpty || assistant.draft.isEmpty)
         if assistant.running { Button("Stop", action: assistant.cancel) }
-        Button("AI setup & file tools") { controller.tab = "AI & tools" }
+        Button("Connect Ollama") { controller.tab = "AI & tools" }
       }
       Text(assistant.status).font(.caption)
       DisclosureGroup("Approved memory") {

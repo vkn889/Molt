@@ -87,7 +87,7 @@ struct CompanionView: View {
                 .font(.caption).foregroundStyle(.secondary)
             }
             switch controller.tab {
-            case "Notch": NotchQuickView(controller: controller)
+            case "Notch": HubView(controller: controller, hub: controller.hub)
             case "Ask Molt":
               PersonalChatView(
                 assistant: controller.assistant, onSetup: { controller.tab = "AI & tools" })
@@ -95,7 +95,12 @@ struct CompanionView: View {
               MoltingView(assistant: controller.assistant, onChat: { controller.tab = "Ask Molt" })
             case "Agent": AgentView(controller: controller, assistant: controller.assistant)
             case "AI & tools":
-              AssistantView(assistant: controller.assistant, controller: controller)
+              VStack(alignment: .leading, spacing: 12) {
+                Text("Your local helper").font(MoltTheme.display(24))
+                Text("Connect Ollama on this Mac to chat with Molt.")
+                Button("Connect to Ollama", action: controller.assistant.refresh).disabled(controller.assistant.running)
+                Text(controller.assistant.status).font(.caption)
+              }
             case "Play": GameView(controller: controller)
             case "Capture": QuickCaptureView(controller: controller)
             case "Today": TodayView(controller: controller)
@@ -137,7 +142,7 @@ struct AdoptionView: View {
             $0.adoptionComplete = true
             $0.remember("Our first day together.", kind: "adoption", at: Date())
           }
-        }.buttonStyle(GlassButtonStyle()).tint(MoltTheme.green)
+        }.buttonStyle(RetroButtonStyle()).tint(MoltTheme.green)
       }
       Button("Skip for now") { controller.changeCompanion { $0.adoptionComplete = true } }.font(
         .caption)
@@ -213,7 +218,7 @@ struct TodayView: View {
             Text("50 minutes").tag(50)
           }
           Button("Start focus") { controller.focus(minutes: minutes, task: selectedTask) }
-            .buttonStyle(GlassButtonStyle()).tint(MoltTheme.green)
+            .buttonStyle(RetroButtonStyle()).tint(MoltTheme.green)
         }
         Picker("Work on", selection: $selectedTask) {
           Text("Open focus").tag(nil as UUID?)

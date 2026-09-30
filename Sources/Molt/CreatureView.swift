@@ -8,7 +8,7 @@ struct MoltTheme {
   static let paper = Color(
     nsColor: NSColor(name: nil) { appearance in
       appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        ? .black : NSColor(white: 0.98, alpha: 1)
+        ? NSColor(red: 0.09, green: 0.075, blue: 0.16, alpha: 1) : NSColor(red: 0.98, green: 0.94, blue: 0.82, alpha: 1)
     })
   static func accent(_ name: String) -> Color {
     switch name {
@@ -19,9 +19,9 @@ struct MoltTheme {
     default: return .mint
     }
   }
-  static func display(_ size: CGFloat) -> Font { .custom("Oxanium", size: size).weight(.semibold) }
+  static func display(_ size: CGFloat) -> Font { .custom("Shrikhand-Regular", size: size) }
   static func registerFont() {
-    if let url = resource("Fonts/Oxanium", extension: "ttf") {
+    if let url = resource("Fonts/Shrikhand-Regular", extension: "ttf") {
       CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
     }
   }
@@ -194,7 +194,7 @@ struct MoltCard<Content: View>: View {
       if !title.isEmpty { Text(title).font(MoltTheme.display(18)) }
       content
     }.padding(20).frame(maxWidth: .infinity, alignment: .leading).background(
-      GlassSurface(radius: 18)
+      RetroSurface(radius: 18)
     )
   }
 }

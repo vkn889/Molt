@@ -41,7 +41,7 @@ struct PersonalChatView: View {
         Button("New chat", action: assistant.newConversation)
         Spacer()
         if assistant.selectedModel.isEmpty {
-          Button("Set up AI", action: onSetup)
+          Button("Connect to Ollama", action: assistant.refresh)
         } else if assistant.running {
           Button("Stop", action: assistant.cancel)
         } else {
@@ -101,7 +101,7 @@ struct ScreenHelpView: View {
           Text(help.recognizedText).font(.caption).textSelection(.enabled)
         }
         Text(
-          "Images require a local Ollama vision model. The compact managed model can help with extracted text."
+          "Use extracted text for reliable screen help. Image support depends on your connected Ollama service."
         ).font(.caption2).foregroundStyle(.secondary)
       }
     }.padding(12).background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))

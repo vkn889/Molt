@@ -197,10 +197,10 @@ struct IslandView: View {
         } label: {
           Image(systemName: "xmark")
         }.help("Hide Molt (Command–Shift–Enter)")
-      }.buttonStyle(GlassButtonStyle()).padding(.horizontal, 18).frame(height: 44)
+      }.buttonStyle(RetroButtonStyle()).padding(.horizontal, 18).frame(height: 44)
       Divider().opacity(0.3)
       CompanionView(controller: controller, compact: true)
-        .modifier(GlassPageMotion(route: controller.tab))
+        .modifier(RetroPageMotion(route: controller.tab))
         .disabled(navigationOpen).accessibilityHidden(navigationOpen)
     }.background {
       ZStack {
@@ -213,7 +213,7 @@ struct IslandView: View {
           GeometryReader { proxy in
             ZStack(alignment: .topLeading) {
               Color.black.opacity(0.20).contentShape(Rectangle()).onTapGesture { navigationOpen = false }
-              GlassNavigation(selection: $controller.tab, theme: $theme, accent: $accent,
+              RetroNavigation(selection: $controller.tab, theme: $theme, accent: $accent,
                 display: $coordinator.displayChoice, shortcut: coordinator.shortcutMessage,
                 dismiss: { navigationOpen = false })
                 .frame(width: min(480, proxy.size.width - 24), height: max(100, proxy.size.height - coordinator.safeTop - 50))
@@ -225,11 +225,11 @@ struct IslandView: View {
       .animation(motion, value: navigationOpen)
       .animation(motion, value: controller.tab)
       .environment(\.moltReducedMotion, controller.companion.preferences.reducedMotion)
-      .buttonStyle(GlassButtonStyle())
+      .buttonStyle(RetroButtonStyle())
       .clipShape(UnevenNotchShape())
       .mask {
         GeometryReader { geometry in
-          RoundedRectangle(cornerRadius: 10 + 16 * coordinator.reveal)
+          UnevenNotchShape()
             .frame(
               width: coordinator.notchWidth + (geometry.size.width - coordinator.notchWidth)
                 * coordinator.reveal,
@@ -302,7 +302,7 @@ struct NotchQuickView: View {
           Button("Chat") { controller.tab = "Ask Molt" }
           Button("Molting") { controller.tab = "Molting" }
           Button("Focus 25m") { controller.focus(minutes: 25) }
-        }.buttonStyle(GlassButtonStyle())
+        }.buttonStyle(RetroButtonStyle())
         HStack {
           ForEach(controller.definition.interactions.prefix(3), id: \.id) { action in
             Button(action.name) { controller.interact(action) }.disabled(
@@ -310,7 +310,7 @@ struct NotchQuickView: View {
             )
             .help(controller.blockReason(action) ?? action.name)
           }
-        }.buttonStyle(GlassButtonStyle())
+        }.buttonStyle(RetroButtonStyle())
       }
       Spacer(minLength: 0)
       VStack(alignment: .leading, spacing: 8) {

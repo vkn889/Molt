@@ -21,6 +21,7 @@ import SwiftUI
   @Published var tab = "Today"
   @Published var petVisible = true
   @Published var dashboardVisible = true
+  let hub: HubController
   let assistant: AssistantController
   let clock = CompanionClock()
   let contexts = ContextAdapters()
@@ -51,6 +52,7 @@ import SwiftUI
       ?? FileManager.default.url(
         for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true
       ).appendingPathComponent("Molt")
+    hub = HubController(directory: directory)
     assistant = AssistantController(directory: directory)
     store = PetStore(directory: directory)
     let bundled = try PetStore.definition(at: BundledDefinitions.url("molt"))
@@ -170,6 +172,7 @@ import SwiftUI
     }
     contexts.refreshCalendar(selected: organization.consent.selectedCalendars)
     contexts.flush()
+    hub.tickUsage(organization.intervals)
     organization.intervals = ActivityPolicy.retained(
       organization.intervals, preferences: organization.consent, now: Date())
     for index in organization.sessions.indices

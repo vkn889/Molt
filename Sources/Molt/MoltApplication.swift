@@ -172,12 +172,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("molt-agents-\(UUID())")
         let agents = AgentController(directory: root)
         agents.saved.terminalFirst = false
-        agents.start()
+        // Never touches your Claude Code settings.
+        agents.start(upgradingHooks: false)
         print("TOKEN " + (UserDefaults.standard.string(forKey: "agentToken") ?? ""))
         fflush(stdout)
         for _ in 0..<200 {
           try? await Task.sleep(nanoseconds: 100_000_000)
-          for item in agents.pending where Date().timeIntervalSince(item.received) > 0.8 { agents.allow(item.id) }
+          for item in agents.pending where Date().timeIntervalSince(item.received) > 0.8 {
+            if item.isQuestion {
+              // Picks the last option of each question, so the answer is clearly Molt's.
+              agents.answer(item.id, choices: Dictionary(uniqueKeysWithValues: item.questions.map { ($0.question, [$0.options.last?.label ?? "yes"]) }))
+            } else {
+              agents.allow(item.id)
+            }
+          }
         }
         print("LIVE " + agents.live.values.map { "\($0.agent):\($0.status.rawValue):\($0.project)" }.sorted().joined(separator: ","))
         print("FINISHED \(agents.finished.count) TASKS \(agents.saved.tasksFinished)")
@@ -273,7 +281,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     ] where CommandLine.arguments.contains(flag) { controller.tab = tab }
     if let value = argument("--agents-tab") { UserDefaults.standard.set(value, forKey: "agentsTab") }
     if CommandLine.arguments.contains("--demo") {
-      controller.agents.loadDemo(approval: CommandLine.arguments.contains("--approval"))
+      controller.agents.loadDemo(approval: CommandLine.arguments.contains("--approval"), request: argument("--request") ?? "command")
       controller.plans.loadDemo()
       controller.github.loadDemo()
     }

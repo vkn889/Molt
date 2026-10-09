@@ -112,7 +112,17 @@ import UserNotifications
   /// Tells the lobby you're here, unless you've chosen not to be discoverable.
   func announce() {
     guard let profile = account.profile, profile.discoverable else { return }
-    lobby?.track(["username": profile.username, "molt_name": profile.moltName, "palette": profile.palette, "social": profile.social])
+    var meta: [String: Any] = ["username": profile.username, "molt_name": profile.moltName, "palette": profile.palette, "social": profile.social]
+    if shareActivity, let doing { meta["doing"] = String(doing.prefix(60)) }
+    lobby?.track(meta)
+  }
+  /// What you're up to, like "Coding with Claude Code", shown to friends while you're online.
+  var doing: String? { didSet { if doing != oldValue { announce() } } }
+  @Published var shareActivity = UserDefaults.standard.bool(forKey: "shareActivity") {
+    didSet { UserDefaults.standard.set(shareActivity, forKey: "shareActivity"); announce() }
+  }
+  func doing(_ id: UUID) -> String? {
+    (online[id.uuidString]?["doing"] as? String).flatMap { $0.isEmpty ? nil : String($0.prefix(60)) }
   }
 
   // MARK: Friends

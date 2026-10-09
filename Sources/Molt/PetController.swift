@@ -26,6 +26,11 @@ import SwiftUI
   let assistant: AssistantController
   let account: AccountController
   let social: SocialController
+  let agents: AgentController
+  let plans = PlanController()
+  let github = GitHubController()
+  /// When Molt was last clicked or cared for; it squishes and blushes.
+  @Published var poked: Date?
   let clock = CompanionClock()
   let contexts = ContextAdapters()
   let organizationStore: OrganizationStore
@@ -56,6 +61,7 @@ import SwiftUI
     assistant = AssistantController(directory: directory)
     account = AccountController(preview: supplied != nil)
     social = SocialController(account: account)
+    agents = AgentController(directory: directory)
     store = PetStore(directory: directory)
     let bundled = try PetStore.definition(at: BundledDefinitions.url("molt"))
     organizationStore = try OrganizationStore(
@@ -214,7 +220,8 @@ import SwiftUI
       interaction.id == "rest"
       ? "sleeping"
       : interaction.id == "feed" || interaction.id == "snack"
-        ? "eating" : interaction.id == "water" ? "drinking" : "happy"
+        ? "eating" : interaction.id == "water" ? "drinking" : interaction.id == "pet" || interaction.id == "groom" ? "love" : "happy"
+    poked = Date()
     let lines =
       definition.personality.dialogue[interaction.id] ?? [
         "A small moment, just for us.", "Happy to have you here.",

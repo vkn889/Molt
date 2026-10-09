@@ -51,22 +51,30 @@ final class WalkState {
 /// The strip along the bottom of Home where Molt scurries about, or sleeps.
 struct PetLane: View {
   @ObservedObject var controller: PetController
+  @ObservedObject var agents: AgentController
+  init(controller: PetController) {
+    self.controller = controller
+    agents = controller.agents
+  }
   @State private var walk = WalkState()
   @Environment(\.moltReducedMotion) private var reduced
   var body: some View {
     GeometryReader { proxy in
       let size = CGSize(width: 42, height: 39)
       TimelineView(.animation(minimumInterval: 1 / 30, paused: reduced)) { context in
-        let resting = controller.isResting
-        let _ = walk.step(now: context.date, width: proxy.size.width - size.width, liveliness: controller.liveliness, resting: resting)
+        let mood = controller.displayMood
+        // Molt stays put while it works, waits on you or sleeps.
+        let still = ["sleeping", "working", "alert", "tired"].contains(mood)
+        let _ = walk.step(now: context.date, width: proxy.size.width - size.width, liveliness: controller.liveliness, resting: still)
         CreatureView(
-          appearance: controller.companion.appearance, mood: resting ? "sleeping" : controller.mood,
-          moving: !reduced, walking: walk.walking, facingLeft: walk.facingLeft
+          appearance: controller.companion.appearance, mood: mood,
+          moving: !reduced, walking: walk.walking, facingLeft: walk.facingLeft, shell: controller.shellColor, poked: controller.poked
         )
         .frame(width: size.width, height: size.height)
         .position(x: walk.x + size.width / 2, y: proxy.size.height - size.height / 2)
-        .onTapGesture { controller.tab = "Play" }
-        .help("Play with \(controller.petName)")
+        .onTapGesture(count: 2) { controller.tab = "Play" }
+        .onTapGesture { controller.poked = Date() }
+        .help("Say hi to \(controller.petName). Double-click to play.")
       }
     }
   }
@@ -120,7 +128,7 @@ struct PlayView: View {
           let _ = walk.step(now: context.date, width: proxy.size.width - size.width - 24, liveliness: controller.liveliness, resting: resting || reaction != nil)
           CreatureView(
             appearance: controller.companion.appearance, mood: resting ? "sleeping" : controller.mood,
-            moving: !reduced, walking: walk.walking, facingLeft: walk.facingLeft
+            moving: !reduced, walking: walk.walking, facingLeft: walk.facingLeft, poked: controller.poked
           )
           .frame(width: size.width, height: size.height)
           .overlay(alignment: .top) {
@@ -137,6 +145,11 @@ struct PlayView: View {
           Text(controller.petName).font(.system(size: 13, weight: .semibold))
           Text("Level \(controller.companion.experience / 100 + 1)").font(.system(size: 10, weight: .medium))
             .foregroundStyle(.secondary)
+          Spacer(minLength: 4)
+          Button { controller.tab = "Wardrobe" } label: {
+            Label("Wardrobe", systemImage: "tshirt.fill").font(.system(size: 10, weight: .semibold))
+              .padding(.horizontal, 8).frame(height: 20).background(Capsule().fill(Color.white.opacity(0.1)))
+          }.buttonStyle(.plain).help("Dress \(controller.petName) up (⌃⌥W)")
         }
         HStack(spacing: 10) {
           stat("Food", "hunger", .orange)

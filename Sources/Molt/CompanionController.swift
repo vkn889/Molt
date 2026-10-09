@@ -258,7 +258,8 @@ extension PetController {
     do {
       let outfit = try JSONDecoder().decode(Appearance.self, from: Data(contentsOf: url))
       guard ["sage", "ocean", "sunset", "violet"].contains(outfit.palette),
-        companion.inventory.contains(outfit.accessory)
+        (outfit.accessory == "none" || companion.inventory.contains(outfit.accessory)),
+        outfit.outfit.allSatisfy(companion.inventory.contains)
       else { throw MoltError.invalid("Unsupported palette or an accessory you have not unlocked.") }
       changeCompanion { $0.appearance = outfit }
     } catch { self.error = error.localizedDescription }

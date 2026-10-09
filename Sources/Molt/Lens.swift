@@ -62,6 +62,15 @@ import Vision
     NSPasteboard.general.setString(text, forType: .string)
     status = "Text copied."
   }
+  /// Copies what Lens read as a prompt for a coding agent, and brings the terminal forward.
+  func handToAgent() {
+    guard !text.isEmpty else { return }
+    let prompt = "I'm seeing this on my screen:\n\n```\n\(text.prefix(6000))\n```\n\nPlease find the cause and fix it."
+    NSPasteboard.general.clearContents()
+    NSPasteboard.general.setString(prompt, forType: .string)
+    status = "Copied as a prompt. Paste it into Claude Code or Codex."
+    AgentsView.activateTerminal()
+  }
   func searchWeb() {
     let query = String((labels.prefix(3).joined(separator: " ") + " " + text.prefix(120)).trimmingCharacters(in: .whitespacesAndNewlines).prefix(200))
     guard !query.isEmpty else { return }
@@ -73,7 +82,7 @@ import Vision
     let asked = (prompt ?? question).trimmingCharacters(in: .whitespacesAndNewlines)
     guard !asked.isEmpty, image != nil, !running else { return }
     guard let stream = assistant.answer(messages(for: asked)) else {
-      status = "Connect Ollama in Chat first."
+      status = "Choose a model in Chat first."
       return
     }
     question = prompt == nil ? "" : question
@@ -171,7 +180,7 @@ struct LensView: View {
           Image(systemName: "text.viewfinder").font(.system(size: 34)).foregroundStyle(Color.accentColor)
           VStack(alignment: .leading, spacing: 6) {
             Text("Ask about anything on your screen").font(.system(size: 15, weight: .semibold))
-            Text("Drag over text, an image, an error or a QR code. Molt reads it on this Mac and answers with your Ollama model. Shortcut: ⌘⇧L")
+            Text("Drag over text, an image, an error or a QR code. Molt reads it on this Mac with Apple's Vision and answers with the model you chose in Chat. Shortcut: ⌘⇧L")
               .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             HStack {
               Button("Select an area", action: lens.capture)
@@ -190,6 +199,7 @@ struct LensView: View {
           chip(prompt, symbol: "sparkle") { lens.ask(prompt) }
         }
         if !lens.text.isEmpty { chip("Copy text", symbol: "doc.on.doc", action: lens.copyText) }
+        if !lens.text.isEmpty { chip("Send to agent", symbol: "terminal", action: lens.handToAgent) }
         chip("Search web", symbol: "magnifyingglass", action: lens.searchWeb)
         ForEach(lens.codes.prefix(2), id: \.self) { code in
           if let url = URL(string: code), url.scheme == "https" || url.scheme == "http" {

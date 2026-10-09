@@ -77,7 +77,8 @@ struct MoltingView: View {
         ForEach(social.friendsAccepted) { friend in
           let online = social.onlineIDs.contains(friend.id)
           row(friend.profile, online: online) {
-            Text(online ? "Online" : friend.profile.socialTitle).font(.system(size: 10)).foregroundStyle(online ? Color.green : .secondary)
+            Text(online ? social.doing(friend.id) ?? "Online" : friend.profile.socialTitle).font(.system(size: 10))
+              .foregroundStyle(online ? Color.green : .secondary).lineLimit(1)
           } actions: {
             iconButton("figure.2", "Hang out") { social.invite(friend.profile) }.disabled(!online)
             Menu {

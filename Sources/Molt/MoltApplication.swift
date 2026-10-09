@@ -311,6 +311,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       RunLoop.main.run(until: Date().addingTimeInterval(0.5))
     }
     let coordinator = IslandCoordinator(controller: controller, preview: true)
+    if CommandLine.arguments.contains("--lens-permission") { coordinator.lens.needsPermission = true }
     if let value = argument("--banner") {
       switch value {
       case "approval": coordinator.preview(banner: .approval(controller.agents.pending.first?.id ?? UUID()))

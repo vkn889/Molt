@@ -43,9 +43,17 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <key>NSCalendarsFullAccessUsageDescription</key><string>Molt reads only selected calendars for your Today dashboard. It never creates or edits events.</string>
 </dict></plist>
 PLIST
-# Universal binaries need an ad-hoc code signature on Apple Silicon. This is not
-# Developer ID signing or notarization and carries no external author identity.
-codesign --force --deep --sign - "$APP"
+# Signs with "Molt Local Signing" when it exists (scripts/make-signing-cert.sh), so macOS keeps
+# permissions like Screen Recording across updates; otherwise ad-hoc, which macOS treats as a new
+# app every build. MOLT_SIGN_IDENTITY overrides. Neither is Developer ID signing or notarization.
+IDENTITY="${MOLT_SIGN_IDENTITY:-}"
+if [[ -z "$IDENTITY" ]] && security find-identity -v -p codesigning 2>/dev/null | grep -q '"Molt Local Signing"'; then
+  IDENTITY="Molt Local Signing"
+fi
+if [[ -z "$IDENTITY" ]]; then
+  echo "Signing ad-hoc. Run ./scripts/make-signing-cert.sh once so permissions survive updates." >&2
+fi
+codesign --force --deep --sign "${IDENTITY:--}" "$APP"
 codesign --verify --deep --strict "$APP"
 if [[ -d dist/Molt.app ]]; then mv dist/Molt.app "$ASSEMBLY/previous-Molt.app"; fi
 mv "$APP" dist/Molt.app

@@ -16,6 +16,8 @@ import Vision
   @Published private(set) var running = false
   @Published var question = ""
   @Published var status = ""
+  /// Screen Recording isn't granted (or macOS hasn't applied the grant until Molt relaunches).
+  @Published var needsPermission = false
   private let assistant: AssistantController
   private var generation: Task<Void, Never>?
   var hide: () -> Void = {}
@@ -27,23 +29,63 @@ import Vision
   func capture() {
     guard CGPreflightScreenCaptureAccess() else {
       CGRequestScreenCaptureAccess()
-      status = "Allow Molt under Screen Recording in System Settings, then try again."
+      needsPermission = true
+      status = ""
       show()
       return
     }
+    needsPermission = false
     hide()
     let file = FileManager.default.temporaryDirectory.appendingPathComponent("molt-lens-\(UUID().uuidString).png")
     Task {
       try? await Task.sleep(nanoseconds: 450_000_000)
       _ = await QuickActions.output("/usr/sbin/screencapture", ["-i", "-x", "-o", file.path])
       defer { try? FileManager.default.removeItem(at: file) }
-      guard let loaded = NSImage(contentsOf: file), let cg = loaded.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
-        return
-      }
-      image = loaded
-      answer = ""
+      guard let loaded = NSImage(contentsOf: file) else { return }
       show()
-      await analyze(cg)
+      await use(loaded)
+    }
+  }
+  /// Reads an image from anywhere: a selection, the clipboard or a dropped file.
+  func use(_ loaded: NSImage) async {
+    guard let cg = loaded.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+      status = "That image couldn't be read."
+      return
+    }
+    needsPermission = false
+    image = loaded
+    answer = ""
+    await analyze(cg)
+  }
+  /// A screenshot you took yourself (⌃⌘⇧4 copies one) needs no Screen Recording permission.
+  func pasteScreenshot() {
+    guard let image = NSPasteboard.general.readObjects(forClasses: [NSImage.self])?.first as? NSImage else {
+      status = "No image on the clipboard. Press ⌃⌘⇧4, select an area, then paste."
+      return
+    }
+    Task { await use(image) }
+  }
+  func openPermissionSettings() {
+    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") { NSWorkspace.shared.open(url) }
+  }
+  /// macOS applies a new Screen Recording grant only after the app restarts.
+  func relaunch() {
+    let path = Bundle.main.bundleURL.path
+    guard Bundle.main.bundleURL.pathExtension == "app" else { status = "Relaunch only works for the installed app."; return }
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/bin/sh")
+    process.arguments = ["-c", "sleep 1; /usr/bin/open \"$0\"", path]
+    try? process.run()
+    NSApp.terminate(nil)
+  }
+  /// Clears a stale grant from an earlier build, so macOS asks again from scratch.
+  func resetPermission() {
+    let id = Bundle.main.bundleIdentifier ?? "app.molt.companion"
+    Task {
+      _ = await QuickActions.output("/usr/bin/tccutil", ["reset", "ScreenCapture", id])
+      status = "Permission reset. Molt will relaunch; then choose Select an area and allow it."
+      try? await Task.sleep(nanoseconds: 1_200_000_000)
+      relaunch()
     }
   }
   func clear() {
@@ -175,6 +217,26 @@ struct LensView: View {
             }
           }
         }
+      } else if lens.needsPermission {
+        HStack(alignment: .top, spacing: 18) {
+          Image(systemName: "lock.rectangle.on.rectangle").font(.system(size: 30)).foregroundStyle(.orange)
+          VStack(alignment: .leading, spacing: 6) {
+            Text("Lens needs Screen Recording").font(.system(size: 14, weight: .semibold))
+            Text("Turn Molt on under Screen Recording, then relaunch Molt; macOS only applies it after a restart. If Molt is already on but Lens still can't see, the setting is left over from an older build: reset it.")
+              .font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 6) {
+              Button("Open Settings", action: lens.openPermissionSettings)
+              Button("Relaunch Molt", action: lens.relaunch)
+              Button("Reset permission", action: lens.resetPermission)
+            }
+            HStack(spacing: 6) {
+              Text("No permission needed: press ⌃⌘⇧4, select an area, then").font(.system(size: 10)).foregroundStyle(.secondary)
+              Button("Paste screenshot", action: lens.pasteScreenshot).buttonStyle(.plain)
+                .font(.system(size: 10, weight: .semibold)).foregroundStyle(Color.accentColor)
+            }
+            if !lens.status.isEmpty { Text(lens.status).font(.system(size: 10)).foregroundStyle(.orange).lineLimit(2) }
+          }.frame(maxWidth: 520, alignment: .leading)
+        }.frame(maxWidth: .infinity, maxHeight: .infinity)
       } else {
         HStack(spacing: 18) {
           Image(systemName: "text.viewfinder").font(.system(size: 34)).foregroundStyle(Color.accentColor)
@@ -184,6 +246,7 @@ struct LensView: View {
               .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             HStack {
               Button("Select an area", action: lens.capture)
+              Button("Paste screenshot", action: lens.pasteScreenshot).help("Use an image on the clipboard, such as one from ⌃⌘⇧4")
               if !lens.status.isEmpty { Text(lens.status).font(.system(size: 10)).foregroundStyle(.orange).lineLimit(2) }
             }
           }.frame(maxWidth: 460, alignment: .leading)
@@ -191,6 +254,14 @@ struct LensView: View {
       }
     }
     .padding(.horizontal, 22).padding(.top, 8).padding(.bottom, 12)
+    .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+      guard let provider = providers.first else { return false }
+      _ = provider.loadObject(ofClass: URL.self) { url, _ in
+        guard let url, let image = NSImage(contentsOf: url) else { return }
+        Task { @MainActor in await lens.use(image) }
+      }
+      return true
+    }
   }
   private var chips: some View {
     ScrollView(.horizontal, showsIndicators: false) {

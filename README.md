@@ -90,6 +90,14 @@ Molt adds HTTP hooks to `~/.claude/settings.json` (including one on `PreToolUse`
 
 Sixteen pixel items in four slots (head, face, neck, back), one per slot. You earn them by caring for Molt, reaching friend points in Hangouts, finishing agent tasks and keeping a GitHub streak. Seasonal items (a pumpkin in October, a winter hat in December, bunny ears in April) are yours to keep if you collect them that month. Lending your setup lends your outfit too.
 
+### If Lens can't see your screen
+
+Lens needs **Screen Recording** (System Settings › Privacy & Security › Screen & System Audio Recording). macOS applies it only after Molt relaunches, and it ties the permission to the exact build, so after an update an old "on" switch can stop working. Lens shows **Open Settings**, **Relaunch Molt** and **Reset permission** (clears the old switch so macOS asks again).
+
+You can always skip the permission: press **⌃⌘⇧4**, select an area (macOS copies it), then choose **Paste screenshot** in Lens, or drop an image onto Lens.
+
+If you build Molt yourself, run `./scripts/make-signing-cert.sh` once. Builds are then signed with the same local identity, and macOS keeps the permission across updates.
+
 ## Mac health
 
 Click the health column on Home, or the Mac health widget:

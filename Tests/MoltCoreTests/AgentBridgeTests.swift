@@ -273,3 +273,83 @@ final class CodexNotifyTests: XCTestCase {
     XCTAssertEqual(CodexNotifyInstaller.shellQuote("it's"), #"'it'\''s'"#)
   }
 }
+
+final class QuestionAndDiffTests: XCTestCase {
+  let questionInput = Data(#"{"questions":[{"question":"Pick a color","header":"Color","multiSelect":false,"options":[{"label":"Red","description":"Warm"},{"label":"Blue"}]},{"question":"Toppings?","multiSelect":true,"options":[{"label":"A"},{"label":"B"}]}]}"#.utf8)
+
+  func testParsesQuestions() {
+    let questions = AgentQuestion.parse(questionInput)
+    XCTAssertEqual(questions.count, 2)
+    XCTAssertEqual(questions[0].header, "Color")
+    XCTAssertEqual(questions[0].options.map(\.label), ["Red", "Blue"])
+    XCTAssertEqual(questions[0].options[0].detail, "Warm")
+    XCTAssertTrue(questions[1].multiSelect)
+    XCTAssertTrue(AgentQuestion.parse(Data("{}".utf8)).isEmpty)
+  }
+
+  func testPreToolUseHookBecomesQuestion() throws {
+    let json = #"{"hook_event_name":"PreToolUse","session_id":"s","tool_name":"AskUserQuestion","tool_use_id":"t9","tool_input":{"questions":[{"question":"Q?","options":[{"label":"Yes"}]}]}}"#
+    let event = try XCTUnwrap(AgentEvent.claude(Data(json.utf8)))
+    XCTAssertEqual(event.kind, .question)
+    XCTAssertEqual(event.toolUseID, "t9")
+    XCTAssertEqual(event.questions.first?.question, "Q?")
+    // Other tools' PreToolUse events are not Molt's business.
+    XCTAssertNil(AgentEvent.claude(Data(#"{"hook_event_name":"PreToolUse","tool_name":"Bash"}"#.utf8)))
+  }
+
+  func testAnswersEchoQuestions() throws {
+    let body = QuestionReply.preToolUse(input: questionInput, choices: ["Pick a color": ["Blue"], "Toppings?": ["A", "B"]])
+    let row = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+    let output = try XCTUnwrap(row["hookSpecificOutput"] as? [String: Any])
+    XCTAssertEqual(output["hookEventName"] as? String, "PreToolUse")
+    XCTAssertEqual(output["permissionDecision"] as? String, "allow")
+    let input = try XCTUnwrap(output["updatedInput"] as? [String: Any])
+    XCTAssertEqual((input["questions"] as? [Any])?.count, 2)
+    XCTAssertEqual(input["answers"] as? [String: String], ["Pick a color": "Blue", "Toppings?": "A, B"])
+    let permission = try XCTUnwrap(JSONSerialization.jsonObject(with: QuestionReply.permission(input: questionInput, choices: ["Pick a color": ["Red"]])) as? [String: Any])
+    let decision = (permission["hookSpecificOutput"] as? [String: Any])?["decision"] as? [String: Any]
+    XCTAssertEqual(decision?["behavior"] as? String, "allow")
+    XCTAssertNotNil(decision?["updatedInput"])
+  }
+
+  func testLineDiff() {
+    let diff = LineDiff.diff("a\nb\nc\nd\ne\nf\ng", "a\nb\nc\nD\ne\nf\ng", context: 1)
+    XCTAssertEqual(diff, [DiffLine(.same, "c"), DiffLine(.removed, "d"), DiffLine(.added, "D"), DiffLine(.same, "e")])
+    XCTAssertEqual(LineDiff.diff("same", "same"), [])
+    let far = LineDiff.diff("1\n2\n3\n4\n5\n6\n7\n8\n9", "x\n2\n3\n4\n5\n6\n7\n8\ny", context: 1)
+    XCTAssertTrue(far.contains(DiffLine(.gap, "")))
+  }
+
+  func testProposedChanges() throws {
+    let edit = try XCTUnwrap(ProposedChange.from(tool: "Edit", input: Data(#"{"file_path":"/a.swift","old_string":"let x = 1","new_string":"let x = 2\nlet y = 3","replace_all":true}"#.utf8), current: nil))
+    XCTAssertEqual(edit.added, 2)
+    XCTAssertEqual(edit.removed, 1)
+    XCTAssertFalse(edit.note.isEmpty)
+    let created = try XCTUnwrap(ProposedChange.from(tool: "Write", input: Data(#"{"file_path":"/n.txt","content":"one\ntwo\n"}"#.utf8), current: nil))
+    XCTAssertTrue(created.created)
+    XCTAssertEqual(created.added, 2)
+    let replaced = try XCTUnwrap(ProposedChange.from(tool: "Write", input: Data(#"{"file_path":"/n.txt","content":"one\nthree"}"#.utf8), current: "one\ntwo"))
+    XCTAssertFalse(replaced.created)
+    XCTAssertEqual(replaced.removed, 1)
+    let multi = try XCTUnwrap(ProposedChange.from(tool: "MultiEdit", input: Data(#"{"file_path":"/m","edits":[{"old_string":"a","new_string":"b"},{"old_string":"c","new_string":"d"}]}"#.utf8), current: nil))
+    XCTAssertEqual(multi.added, 2)
+    XCTAssertTrue(multi.lines.contains(DiffLine(.gap, "")))
+    XCTAssertNil(ProposedChange.from(tool: "Bash", input: Data(#"{"command":"ls"}"#.utf8), current: nil))
+  }
+
+  func testInstallerAddsQuestionHookAndUpgrades() throws {
+    let installed = ClaudeHookInstaller.install(into: [:], url: "http://127.0.0.1:43822", token: "tok")
+    let pre = try XCTUnwrap((installed["hooks"] as? [String: Any])?["PreToolUse"] as? [[String: Any]])
+    XCTAssertEqual(pre.first?["matcher"] as? String, "AskUserQuestion")
+    XCTAssertFalse(ClaudeHookInstaller.outdated(in: installed))
+    XCTAssertEqual(ClaudeHookInstaller.token(in: installed), "tok")
+    // A 0.9.0 install had no PreToolUse hook.
+    var old = installed
+    var hooks = old["hooks"] as! [String: Any]
+    hooks["PreToolUse"] = nil
+    old["hooks"] = hooks
+    XCTAssertTrue(ClaudeHookInstaller.outdated(in: old))
+    XCTAssertFalse(ClaudeHookInstaller.outdated(in: [:]))
+    XCTAssertNil(ClaudeHookInstaller.token(in: [:]))
+  }
+}

@@ -69,7 +69,8 @@ Press **⌘⇧L** (or the viewfinder icon) and drag over text, an image, an erro
 
 Open **Agents › Setup** and choose **Connect** for Claude Code and Codex.
 
-- **Approvals in the notch:** when Claude Code wants to run a command or edit a file, Molt drops down with what it wants to do, how risky it looks (reads, changes files, or careful) and the agent's reason. **Allow**, **This session**, **Deny**, or hand it back to the **Terminal**. If you're already in your terminal, it asks you there instead (you can turn that off).
+- **Approvals in the notch:** when Claude Code wants to run a command or edit a file, Molt drops down with what it wants to do, how risky it looks and the agent's reason. For edits you see the **diff** first: the lines it would remove and add, or the whole file if it's new. **Allow**, **This session**, **Deny**, or hand it back to the **Terminal**. If you're already in your terminal, it asks you there instead (you can turn that off).
+- **Questions:** when Claude Code asks you to choose (its multiple-choice questions), the options appear as buttons in the notch. Pick one, pick several, or type your own answer; questions with several parts go one at a time.
 - **Habits:** allow the same safe thing three times and Molt offers to always allow it. Risky commands (deleting recursively, force-pushing, `sudo`, piping downloads into a shell) always ask. Rules live in **Agents › Setup**.
 - **Status:** with the notch closed, Molt sits at its laptop in the agent's color while it works and pops up a **!** when it needs you. Long tasks end with a "finished" note; finished notes wait while you're in a focus session.
 - **Live:** every session with its project and timer, plus the agents running on this Mac (Claude Code, Codex, Gemini CLI, Cursor Agent, OpenCode, Amp, Copilot CLI, Aider, Goose) with memory, CPU and uptime, and a **Stop** button.
@@ -79,7 +80,9 @@ Open **Agents › Setup** and choose **Connect** for Claude Code and Codex.
 
 ![Agents](docs/screenshots/notch-agents.png)
 
-Molt adds HTTP hooks to `~/.claude/settings.json` (keeping a one-time `settings.json.before-molt` backup and every other setting) and points Codex's `notify` at a small script, keeping any notify program you already had. Both talk only to `127.0.0.1:43822` with a random token. When Molt isn't running, the agents ask in the terminal as usual. **Disconnect** removes only Molt's parts.
+![Question](docs/screenshots/notch-question.png)
+
+Molt adds HTTP hooks to `~/.claude/settings.json` (including one on `PreToolUse` that only matches `AskUserQuestion`, so other tools never wait on Molt) (keeping a one-time `settings.json.before-molt` backup and every other setting) and points Codex's `notify` at a small script, keeping any notify program you already had. Both talk only to `127.0.0.1:43822` with a random token. When Molt isn't running, the agents ask in the terminal as usual. **Disconnect** removes only Molt's parts.
 
 ## Wardrobe
 
@@ -120,11 +123,11 @@ Requires macOS 13+, Swift 5.9+, and full Xcode for universal builds and XCTest.
 ```sh
 swift run Molt
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --scratch-path .build-xcode
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer ./scripts/package.sh 0.9.0
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer ./scripts/package.sh 0.9.1
 open dist/Molt.app
 ```
 
-The package script produces `dist/Molt-0.9.0.dmg` and an ad-hoc signed universal app. Ad-hoc signing is not Apple notarization.
+The package script produces `dist/Molt-0.9.1.dmg` and an ad-hoc signed universal app. Ad-hoc signing is not Apple notarization.
 
 The backend is a Supabase project; its schema and security rules are in [`supabase/migrations`](supabase/migrations). The app ships only the publishable key; row-level security decides what each signed-in user can read and write.
 
@@ -146,4 +149,4 @@ The backend is a Supabase project; its schema and security rules are in [`supaba
 
 - [Architecture](docs/architecture.md)
 - [Companion definitions](docs/definitions.md)
-- [0.9.0 release notes](docs/releases/0.9.0.md)
+- [0.9.1 release notes](docs/releases/0.9.1.md)

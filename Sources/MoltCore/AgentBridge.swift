@@ -28,7 +28,7 @@ public struct AgentKind: Identifiable, Equatable, Sendable {
 
 /// One event an agent reported to Molt through a hook.
 public struct AgentEvent: Equatable, Sendable {
-  public enum Kind: String, Sendable { case permission, prompt, stop, notification, start, toolDone, end }
+  public enum Kind: String, Sendable { case permission, question, prompt, stop, notification, start, toolDone, end }
   public var kind: Kind
   public var agent: String
   public var session: String
@@ -40,10 +40,14 @@ public struct AgentEvent: Equatable, Sendable {
   public var reason: String
   public var message: String
   public var raw: [String: String]
-  public init(kind: Kind, agent: String, session: String, directory: String, tool: String, target: String, reason: String, message: String, raw: [String: String]) {
+  /// The tool's input exactly as the agent sent it, as JSON.
+  public var input: Data
+  public init(kind: Kind, agent: String, session: String, directory: String, tool: String, target: String, reason: String, message: String, raw: [String: String], input: Data = Data("{}".utf8)) {
     self.kind = kind; self.agent = agent; self.session = session; self.directory = directory; self.tool = tool
-    self.target = target; self.reason = reason; self.message = message; self.raw = raw
+    self.target = target; self.reason = reason; self.message = message; self.raw = raw; self.input = input
   }
+  public var toolUseID: String { raw["tool_use_id"] ?? "" }
+  public var questions: [AgentQuestion] { AgentQuestion.parse(input) }
 
   public var project: String { directory.isEmpty ? "" : URL(fileURLWithPath: directory).lastPathComponent }
 
@@ -55,6 +59,8 @@ public struct AgentEvent: Equatable, Sendable {
     let kind: Kind
     switch name {
     case "PermissionRequest": kind = .permission
+    // Molt only asks for PreToolUse on AskUserQuestion, to answer it from the notch.
+    case "PreToolUse" where row["tool_name"] as? String == "AskUserQuestion": kind = .question
     case "UserPromptSubmit": kind = .prompt
     case "Stop": kind = .stop
     case "Notification": kind = .notification
@@ -70,7 +76,8 @@ public struct AgentEvent: Equatable, Sendable {
       directory: row["cwd"] as? String ?? "", tool: tool, target: target(tool: tool, input: input),
       reason: String((input["description"] as? String ?? "").prefix(300)),
       message: String((row["last_assistant_message"] as? String ?? row["message"] as? String ?? row["prompt"] as? String ?? "").prefix(600)),
-      raw: ["tool_use_id": row["tool_use_id"] as? String ?? "", "notification_type": row["notification_type"] as? String ?? ""])
+      raw: ["tool_use_id": row["tool_use_id"] as? String ?? "", "notification_type": row["notification_type"] as? String ?? ""],
+      input: (try? JSONSerialization.data(withJSONObject: input)) ?? Data("{}".utf8))
   }
 
   /// Parses Codex's `notify` payload, which arrives when a turn completes.
@@ -89,6 +96,161 @@ public struct AgentEvent: Equatable, Sendable {
     for key in keys { if let value = input[key] as? String, !value.isEmpty { return String(value.prefix(2000)) } }
     if let questions = input["questions"] as? [[String: Any]], let first = questions.first?["question"] as? String { return first }
     return ""
+  }
+}
+
+/// A multiple-choice question an agent asks you, from Claude Code's AskUserQuestion tool.
+public struct AgentQuestion: Equatable, Sendable {
+  public struct Option: Equatable, Sendable {
+    public var label: String
+    public var detail: String
+  }
+  public var question: String
+  public var header: String
+  public var options: [Option]
+  public var multiSelect: Bool
+
+  public static func parse(_ input: Data) -> [AgentQuestion] {
+    guard let row = try? JSONSerialization.jsonObject(with: input) as? [String: Any],
+      let list = row["questions"] as? [[String: Any]]
+    else { return [] }
+    return list.prefix(6).compactMap { item in
+      guard let question = item["question"] as? String, !question.isEmpty else { return nil }
+      let options = ((item["options"] as? [[String: Any]]) ?? []).prefix(8).compactMap { option -> Option? in
+        guard let label = option["label"] as? String, !label.isEmpty else { return nil }
+        return Option(label: String(label.prefix(120)), detail: String((option["description"] as? String ?? "").prefix(200)))
+      }
+      return AgentQuestion(
+        question: String(question.prefix(400)), header: String((item["header"] as? String ?? "").prefix(40)),
+        options: options, multiSelect: item["multiSelect"] as? Bool ?? false)
+    }
+  }
+}
+
+/// The body Claude Code expects back when Molt answers questions: the original input with an
+/// `answers` map from each question to the chosen label (labels joined by commas when several).
+public enum QuestionReply {
+  public static func answers(input: Data, choices: [String: [String]]) -> [String: Any] {
+    var row = (try? JSONSerialization.jsonObject(with: input) as? [String: Any]) ?? [:]
+    var answers: [String: String] = [:]
+    for (question, labels) in choices where !labels.isEmpty { answers[question] = labels.joined(separator: ", ") }
+    row["answers"] = answers
+    return row
+  }
+  /// For the PreToolUse hook Molt installs on AskUserQuestion.
+  public static func preToolUse(input: Data, choices: [String: [String]]) -> Data {
+    (try? JSONSerialization.data(withJSONObject: [
+      "hookSpecificOutput": [
+        "hookEventName": "PreToolUse", "permissionDecision": "allow",
+        "updatedInput": answers(input: input, choices: choices),
+      ]
+    ])) ?? Data()
+  }
+  /// For a PermissionRequest on AskUserQuestion, if one arrives instead.
+  public static func permission(input: Data, choices: [String: [String]]) -> Data {
+    (try? JSONSerialization.data(withJSONObject: [
+      "hookSpecificOutput": [
+        "hookEventName": "PermissionRequest",
+        "decision": ["behavior": "allow", "updatedInput": answers(input: input, choices: choices)],
+      ]
+    ])) ?? Data()
+  }
+}
+
+/// A line of a diff.
+public struct DiffLine: Equatable, Sendable {
+  public enum Kind: Equatable, Sendable { case same, added, removed, gap }
+  public var kind: Kind
+  public var text: String
+  public init(_ kind: Kind, _ text: String) { self.kind = kind; self.text = text }
+}
+
+/// What an edit request would change, worked out before you allow it.
+public struct ProposedChange: Equatable, Sendable {
+  public var path: String
+  public var lines: [DiffLine]
+  public var added: Int
+  public var removed: Int
+  /// A new file rather than a change to an existing one.
+  public var created: Bool
+  public var note: String
+
+  /// `current` is the file's contents now, when it exists and is readable text.
+  public static func from(tool: String, input: Data, current: String?) -> ProposedChange? {
+    guard let row = try? JSONSerialization.jsonObject(with: input) as? [String: Any],
+      let path = row["file_path"] as? String
+    else { return nil }
+    var lines: [DiffLine] = []
+    var note = ""
+    var created = false
+    switch tool {
+    case "Edit":
+      guard let old = row["old_string"] as? String, let new = row["new_string"] as? String else { return nil }
+      lines = LineDiff.diff(old, new, context: 2)
+      if row["replace_all"] as? Bool == true { note = "Every occurrence in the file" }
+    case "MultiEdit":
+      let edits = (row["edits"] as? [[String: Any]]) ?? []
+      for (index, edit) in edits.prefix(20).enumerated() {
+        guard let old = edit["old_string"] as? String, let new = edit["new_string"] as? String else { continue }
+        if index > 0 { lines.append(DiffLine(.gap, "")) }
+        lines += LineDiff.diff(old, new, context: 1)
+      }
+      note = edits.count == 1 ? "" : "\(edits.count) edits"
+    case "Write":
+      guard let content = row["content"] as? String else { return nil }
+      if let current {
+        lines = LineDiff.diff(current, content, context: 2)
+        note = "Replaces the whole file"
+      } else {
+        created = true
+        lines = content.components(separatedBy: "\n").map { DiffLine(.added, $0) }
+        if lines.last?.text == "" { lines.removeLast() }
+      }
+    default: return nil
+    }
+    let added = lines.filter { $0.kind == .added }.count, removed = lines.filter { $0.kind == .removed }.count
+    return ProposedChange(path: path, lines: lines, added: added, removed: removed, created: created, note: note)
+  }
+}
+
+/// A line-by-line diff (longest common subsequence), trimmed to the changes and a little context.
+public enum LineDiff {
+  public static func diff(_ old: String, _ new: String, context: Int = 2) -> [DiffLine] {
+    let a = old.components(separatedBy: "\n"), b = new.components(separatedBy: "\n")
+    // Very large inputs: show the old lines removed and the new ones added rather than spend the time.
+    guard a.count * b.count <= 250_000 else {
+      return a.map { DiffLine(.removed, $0) } + b.map { DiffLine(.added, $0) }
+    }
+    var table = Array(repeating: Array(repeating: 0, count: b.count + 1), count: a.count + 1)
+    for i in stride(from: a.count - 1, through: 0, by: -1) {
+      for j in stride(from: b.count - 1, through: 0, by: -1) {
+        table[i][j] = a[i] == b[j] ? table[i + 1][j + 1] + 1 : max(table[i + 1][j], table[i][j + 1])
+      }
+    }
+    var full: [DiffLine] = []
+    var i = 0, j = 0
+    while i < a.count || j < b.count {
+      if i < a.count, j < b.count, a[i] == b[j] {
+        full.append(DiffLine(.same, a[i])); i += 1; j += 1
+      } else if i < a.count, j == b.count || table[i + 1][j] >= table[i][j + 1] {
+        full.append(DiffLine(.removed, a[i])); i += 1
+      } else {
+        full.append(DiffLine(.added, b[j])); j += 1
+      }
+    }
+    // Keep changed lines and `context` unchanged lines around them; mark what was skipped.
+    let changed = full.indices.filter { full[$0].kind != .same }
+    guard !changed.isEmpty else { return [] }
+    var keep = Set<Int>()
+    for index in changed { for k in max(0, index - context)...min(full.count - 1, index + context) { keep.insert(k) } }
+    var result: [DiffLine] = []
+    var last = -1
+    for index in keep.sorted() {
+      if last >= 0, index > last + 1 { result.append(DiffLine(.gap, "")) }
+      result.append(full[index])
+      last = index
+    }
+    return result
   }
 }
 
@@ -213,14 +375,16 @@ public enum ClaudeHookInstaller {
   public static func install(into settings: [String: Any], url: String, token: String) -> [String: Any] {
     var result = remove(from: settings)
     var hooks = result["hooks"] as? [String: Any] ?? [:]
-    for event in events {
+    for event in events + ["PreToolUse"] {
       var groups = hooks[event] as? [[String: Any]] ?? []
+      let waits = event == "PermissionRequest" || event == "PreToolUse"
       let hook: [String: Any] = [
         "type": "http", "url": url + marker, "headers": ["X-Molt-Token": token],
-        // Approvals wait for you; the other events return at once.
-        "timeout": event == "PermissionRequest" ? 600 : 5,
+        // Approvals and questions wait for you; the other events return at once.
+        "timeout": waits ? 600 : 5,
       ]
-      groups.append(["hooks": [hook]])
+      // Only questions go through PreToolUse; every other tool runs without asking Molt.
+      groups.append(event == "PreToolUse" ? ["matcher": "AskUserQuestion", "hooks": [hook]] : ["hooks": [hook]])
       hooks[event] = groups
     }
     result["hooks"] = hooks
@@ -243,6 +407,25 @@ public enum ClaudeHookInstaller {
     }
     result["hooks"] = hooks.isEmpty ? nil : hooks
     return result
+  }
+  /// The token Molt's hooks carry, which identifies the copy of Molt that installed them.
+  public static func token(in settings: [String: Any]) -> String? {
+    for value in (settings["hooks"] as? [String: Any] ?? [:]).values {
+      for group in value as? [[String: Any]] ?? [] {
+        for hook in group["hooks"] as? [[String: Any]] ?? [] where (hook["url"] as? String)?.hasSuffix(marker) ?? false {
+          if let token = (hook["headers"] as? [String: Any])?["X-Molt-Token"] as? String { return token }
+        }
+      }
+    }
+    return nil
+  }
+  /// Installed by an older Molt, without everything this version uses.
+  public static func outdated(in settings: [String: Any]) -> Bool {
+    guard installed(in: settings), let hooks = settings["hooks"] as? [String: Any] else { return false }
+    let groups = hooks["PreToolUse"] as? [[String: Any]] ?? []
+    return !groups.contains { group in
+      (group["hooks"] as? [[String: Any]])?.contains { ($0["url"] as? String)?.hasSuffix(marker) ?? false } ?? false
+    }
   }
   public static func installed(in settings: [String: Any]) -> Bool {
     guard let hooks = settings["hooks"] as? [String: Any], let groups = hooks["PermissionRequest"] as? [[String: Any]] else { return false }

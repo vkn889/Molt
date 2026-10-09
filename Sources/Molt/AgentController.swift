@@ -25,7 +25,11 @@ import SwiftUI
     var risk: ApprovalRisk
     var why: String
     var received: Date
+    /// For edits: what would change, so you can read the diff before allowing it.
+    var change: ProposedChange?
     fileprivate var connection: NWConnection
+    var questions: [AgentQuestion] { event.tool == "AskUserQuestion" ? event.questions : [] }
+    var isQuestion: Bool { !questions.isEmpty }
   }
   struct Finished: Identifiable, Equatable {
     var id = UUID()
@@ -58,7 +62,8 @@ import SwiftUI
     return (saved.finishedDays ?? [:]).filter { $0.key >= cutoff }.reduce(0) { $0 + $1.value }
   }
 
-  static let port: UInt16 = 43822
+  /// `MOLT_AGENT_PORT` moves the listener, for self-tests next to a running Molt.
+  static let port: UInt16 = ProcessInfo.processInfo.environment["MOLT_AGENT_PORT"].flatMap(UInt16.init) ?? 43822
   static var base: String { "http://127.0.0.1:\(port)" }
   @Published private(set) var pending: [Pending] = []
   @Published private(set) var live: [String: Live] = [:]
@@ -79,6 +84,7 @@ import SwiftUI
 
   private let url: URL
   private let token: String
+  private var handedToTerminal: Set<String> = []
   private var listener: NWListener?
   private var sampler: Timer?
 
@@ -114,8 +120,9 @@ import SwiftUI
 
   // MARK: Server
 
-  func start() {
+  func start(upgradingHooks: Bool = true) {
     guard listener == nil else { return }
+    if upgradingHooks { upgradeHooks() }
     do {
       let parameters = NWParameters.tcp
       parameters.requiredLocalEndpoint = .hostPort(host: .ipv4(.loopback), port: NWEndpoint.Port(rawValue: Self.port)!)
@@ -189,7 +196,7 @@ import SwiftUI
     default: event = nil
     }
     guard let event else { reply(connection); return }
-    if event.kind == .permission {
+    if event.kind == .permission || event.kind == .question {
       ask(event, on: connection)
     } else {
       reply(connection)
@@ -237,7 +244,7 @@ import SwiftUI
     case .end:
       live[key] = nil
       return
-    case .permission: break
+    case .permission, .question: break
     }
     entry.since = Date()
     live[key] = entry
@@ -246,7 +253,13 @@ import SwiftUI
   }
 
   private func ask(_ event: AgentEvent, on connection: NWConnection) {
-    if let rule = ApprovalRule.applies(saved.rules, tool: event.tool, target: event.target, session: event.session) {
+    let question = event.tool == "AskUserQuestion"
+    // A question you chose to answer in the terminal can come back as a permission request.
+    if question, handedToTerminal.contains(event.toolUseID) {
+      reply(connection)
+      return
+    }
+    if !question, let rule = ApprovalRule.applies(saved.rules, tool: event.tool, target: event.target, session: event.session) {
       reply(connection, body: PermissionReply.allow())
       status = "Allowed \(rule.signature) by your rule."
       return
@@ -257,7 +270,13 @@ import SwiftUI
       return
     }
     let assessment = ApprovalRisk.assess(tool: event.tool, target: event.target)
-    let item = Pending(event: event, risk: assessment.risk, why: assessment.why, received: Date(), connection: connection)
+    var item = Pending(event: event, risk: assessment.risk, why: assessment.why, received: Date(), change: nil, connection: connection)
+    if question, item.questions.isEmpty {
+      // Nothing Molt can show; let the terminal handle it.
+      reply(connection)
+      return
+    }
+    item.change = Self.change(for: event)
     pending.append(item)
     var entry = live[event.agent + ":" + event.session] ?? Live(id: event.agent + ":" + event.session, agent: event.agent, directory: event.directory, status: .needsYou, since: Date(), turnStarted: Date(), message: "")
     entry.status = .needsYou
@@ -281,7 +300,8 @@ import SwiftUI
   }
 
   func allow(_ id: UUID, remember: Bool = false) {
-    guard let item = take(id) else { return }
+    // Questions need an answer, not just a yes.
+    guard pending.first(where: { $0.id == id })?.isQuestion != true, let item = take(id) else { return }
     reply(item.connection, body: PermissionReply.allow())
     let signature = ApprovalRule.signature(tool: item.event.tool, target: item.event.target)
     if remember {
@@ -291,13 +311,40 @@ import SwiftUI
     }
   }
   func deny(_ id: UUID, message: String = "The user declined this from Molt.") {
+    if pending.first(where: { $0.id == id })?.isQuestion == true { answerInTerminal(id); return }
     guard let item = take(id) else { return }
     reply(item.connection, body: PermissionReply.deny(message))
   }
   /// Gives the question back to the agent's own prompt in the terminal.
   func answerInTerminal(_ id: UUID) {
     guard let item = take(id) else { return }
+    if item.isQuestion {
+      handedToTerminal.insert(item.event.toolUseID)
+      if handedToTerminal.count > 50 { handedToTerminal.removeFirst() }
+    }
     reply(item.connection)
+  }
+  /// Answers an agent's questions. `choices` maps each question to the labels you picked, or to
+  /// what you typed.
+  func answer(_ id: UUID, choices: [String: [String]]) {
+    guard let item = take(id) else { return }
+    let body = item.event.kind == .question
+      ? QuestionReply.preToolUse(input: item.event.input, choices: choices)
+      : QuestionReply.permission(input: item.event.input, choices: choices)
+    reply(item.connection, body: body)
+  }
+  /// The diff for an edit request. Files over 512 KB or that aren't text get no "before".
+  nonisolated static func change(for event: AgentEvent) -> ProposedChange? {
+    guard ["Edit", "MultiEdit", "Write"].contains(event.tool) else { return nil }
+    var current: String?
+    if event.tool == "Write", let row = try? JSONSerialization.jsonObject(with: event.input) as? [String: Any],
+      let path = row["file_path"] as? String,
+      let size = (try? FileManager.default.attributesOfItem(atPath: path))?[.size] as? Int, size <= 512_000,
+      let data = FileManager.default.contents(atPath: path)
+    {
+      current = String(data: data, encoding: .utf8)
+    }
+    return ProposedChange.from(tool: event.tool, input: event.input, current: current)
   }
   private func take(_ id: UUID) -> Pending? {
     guard let index = pending.firstIndex(where: { $0.id == id }) else { return nil }
@@ -333,6 +380,17 @@ import SwiftUI
   private var codexConfig: URL { FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex/config.toml") }
   private var codexScript: URL { url.deletingLastPathComponent().appendingPathComponent("codex-notify.sh") }
 
+  /// Hooks added by an older Molt are brought up to date, so questions reach the notch too.
+  private func upgradeHooks() {
+    guard let data = try? Data(contentsOf: claudeSettings),
+      let settings = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+      ClaudeHookInstaller.outdated(in: settings),
+      // Only hooks this copy of Molt installed; another build's hooks are left alone.
+      ClaudeHookInstaller.token(in: settings).map({ Self.same($0, token) }) == true
+    else { return }
+    connectClaude()
+    status = "Claude Code's questions now come to Molt too."
+  }
   func refreshInstallState() {
     let settings = (try? Data(contentsOf: claudeSettings)).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
     claudeHooks = ClaudeHookInstaller.installed(in: settings)
@@ -423,7 +481,7 @@ import SwiftUI
     refreshInstallState()
   }
   /// Sample sessions for previews and screenshots.
-  func loadDemo(approval: Bool) {
+  func loadDemo(approval: Bool, request: String = "command") {
     let now = Date()
     live = [
       "claude:a": Live(id: "claude:a", agent: "claude", directory: "/Users/me/molt", status: approval ? .needsYou : .working, since: now, turnStarted: now.addingTimeInterval(-194), message: ""),
@@ -446,12 +504,25 @@ import SwiftUI
     claudeHooks = true
     codexNotify = true
     if approval {
-      let event = AgentEvent(
+      var event = AgentEvent(
         kind: .permission, agent: "claude", session: "a", directory: "/Users/me/molt", tool: "Bash",
         target: "git push origin feature/notch-approvals", reason: "Push the branch so CI can run", message: "", raw: [:])
+      switch request {
+      case "question":
+        event.kind = .question
+        event.tool = "AskUserQuestion"
+        event.input = Data(#"{"questions":[{"question":"Where should Molt keep the approval history?","header":"Storage","multiSelect":false,"options":[{"label":"SQLite","description":"Alongside tasks, transactional"},{"label":"JSON file","description":"Simple, like hub.json"},{"label":"Keychain","description":"Encrypted, small values only"},{"label":"Don't keep it","description":"Forget after answering"}]}]}"#.utf8)
+        event.target = "Where should Molt keep the approval history?"
+      case "edit":
+        event.tool = "Edit"
+        event.target = "/Users/me/molt/Sources/Molt/CreatureView.swift"
+        event.reason = ""
+        event.input = Data(#"{"file_path":"/Users/me/molt/Sources/Molt/CreatureView.swift","old_string":"    case .happy: hop(period: 0.62, height: 2.2)\n    case .celebrate: hop(period: 0.5, height: 3)","new_string":"    case .happy: hop(period: 0.62, height: 2.2)\n    // Bigger jumps when an agent finishes.\n    case .celebrate: hop(period: 0.45, height: 3.6)"}"#.utf8)
+      default: break
+      }
       let assessment = ApprovalRisk.assess(tool: event.tool, target: event.target)
       pending = [Pending(event: event, risk: assessment.risk, why: assessment.why, received: now,
-        connection: NWConnection(host: "127.0.0.1", port: 9, using: .tcp))]
+        change: Self.change(for: event), connection: NWConnection(host: "127.0.0.1", port: 9, using: .tcp))]
     }
   }
 

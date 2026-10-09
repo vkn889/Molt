@@ -140,8 +140,14 @@ import SwiftUI
   }
   var bannerSize: CGSize { size(for: banner) }
   func size(for banner: IslandBanner?) -> CGSize {
-    let tall = banner?.isApproval == true
-    return CGSize(width: min(680, max(notchWidth + 380, 600)), height: headerHeight + (tall ? 104 : 58))
+    var height: CGFloat = 58
+    if banner?.isApproval == true {
+      // Questions need room for their options; edits for their diff.
+      let item = controller.agents.pending.first
+      let options = item?.questions.map(\.options.count).max() ?? 0
+      height = item?.isQuestion == true ? QuestionCard.height(options: options) : item?.change != nil ? 104 + DiffPreview.height - 24 : 104
+    }
+    return CGSize(width: min(680, max(notchWidth + 380, 600)), height: headerHeight + height)
   }
   private var reducedMotion: Bool {
     controller.companion.preferences.reducedMotion || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion

@@ -1,0 +1,22 @@
+{
+  "name": "molt-video",
+  "private": true,
+  "version": "0.9.0",
+  "description": "The Molt release video, rendered with Remotion from the app's own frames and screenshots.",
+  "scripts": {
+    "frames": "./make-assets.sh",
+    "studio": "remotion studio",
+    "render": "remotion render MoltRelease out/Molt-0.9.0.mp4"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.534",
+    "@remotion/google-fonts": "4.0.534",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
+    "remotion": "4.0.534"
+  },
+  "devDependencies": {
+    "@types/react": "19.0.0",
+    "typescript": "5.6.3"
+  }
+}

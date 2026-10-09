@@ -73,6 +73,8 @@ enum MoltIcon {
     case .eye, .mouth: return NSColor(white: 0.07, alpha: 1)
     case .leaf: return NSColor(red: 0.49, green: 0.88, blue: 0.42, alpha: 1)
     case .stem: return NSColor(red: 0.2, green: 0.55, blue: 0.3, alpha: 1)
+    case .blush: return NSColor(red: 1, green: 0.55, blue: 0.62, alpha: 1)
+    case .paint(let rgb): return NSColor(Color(rgb: rgb))
     }
   }
 

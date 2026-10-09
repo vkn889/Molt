@@ -30,7 +30,7 @@ Pet archives include only pet data, embedded species and optional sprite atlas. 
 
 `IslandCoordinator` owns one borderless panel pinned to the top center of the chosen display. Every page shares one size (`bodyHeight` below the menu-bar band). The header sits in the band on either side of the hardware notch, and `NotchShape` draws the black silhouette with outward flares at the top and continuous rounded corners at the bottom. The window grows before content animates open and shrinks only after it animates closed. Hovering the notch opens Home without taking focus; moving away closes it unless a control inside became key or a drag is in progress. While music plays and Molt is closed, the panel stays at notch height with artwork on the left and a level meter on the right.
 
-Pages: Home (`NotchHomeView`), Hub (`HubView`), Play (`PlayView`), Molting (`MoltingView`), Lens (`LensView`), Health (`HealthDetailView`), Claude Code & Codex (`SessionsView`), Chat (`PersonalChatView`) and Settings (`SettingsView`). Until an account exists, every page is replaced by `AccountGate`.
+Pages: Home (`NotchHomeView`), Hub (`HubView`), Play (`PlayView`), Wardrobe (`WardrobeView`), Molting (`MoltingView`), Lens (`LensView`), Health (`HealthDetailView`), Agents (`AgentsView`, with `SessionsView` as its Chats tab), Chat (`PersonalChatView`) and Settings (`SettingsView`). Until an account exists, every page is replaced by `AccountGate`.
 
 ## Hub widgets
 
@@ -55,6 +55,24 @@ Points are awarded only by the `end_hangout` database function (at least one min
 `NowPlayingController` follows Spotify and Apple Music. Track changes arrive through each player's distributed notification; AppleScript reads position and artwork and sends playback commands, only to a player that is already running. With a connected Spotify account and no local player, it follows Spotify Connect through the Web API instead. Position is polled every two seconds while the notch is open and interpolated between polls.
 
 `MusicLibrary` lists playlists. `SpotifyAccount` signs in with OAuth authorization code and PKCE, using a loopback listener on `127.0.0.1:43821` and a Client ID the user registers; tokens live in the keychain and refresh automatically. Playlists play through the desktop app launched hidden, or through the Web API on an active device. `AppleMusicLibrary` reads library playlists and their cover art from Music by AppleScript and plays them with Music hidden. Playlist references are validated before they reach a script.
+
+## Agents
+
+`AgentController` runs a loopback HTTP listener on `127.0.0.1:43822` (Network framework). Claude Code reaches it through `type: "http"` hooks that `ClaudeHookInstaller` (core, tested) merges into `~/.claude/settings.json`, and Codex through a `notify` script that `CodexNotifyInstaller` (core, tested) puts first in `~/.codex/config.toml`, chaining any program already there. Every request carries a random token compared in constant time. `AgentEvent` (core) parses both payloads.
+
+A `PermissionRequest` holds its connection open until you answer; the reply is Claude Code's `hookSpecificOutput.decision`. An empty reply hands the question back to the terminal, which also happens after 580 seconds, before Claude Code's 600-second hook timeout. `ApprovalRisk` classifies a request; `ApprovalRule.signature` generalizes simple commands to program plus subcommand and never generalizes chains or substitutions; high-risk requests are never answered by a rule. `ApprovalHabits` offers a rule after three approvals.
+
+Running agents come from `ps -axo pid,pcpu,rss,etime,args` matched against `AgentKind`. `PlanController` reads Codex's `rate_limits` from the tail of its newest session log, and, only when enabled, Claude's usage endpoint with Claude Code's keychain token; `LimitWindow.forecast` extrapolates the current pace. `GitHubController` makes one GraphQL request (viewer PRs with check rollups, review requests, contribution calendar, one repository's default branch), signed in with `gh auth token` or a keychain token. `AgentChanges` extracts edited files from transcripts; `git diff --numstat HEAD` gives what is still uncommitted.
+
+The island shows a banner (`IslandBanner`) beside the closed notch: approvals stay until answered, everything else fades after seven seconds and waits during focus. Global shortcuts use Control-Option, or Control-Option-Command while VoiceOver is on; Allow and Deny are registered only while an approval waits.
+
+## Chat services
+
+`InferenceProvider` has three implementations: `OllamaProvider` (local only, refuses cloud models), `OpenAICompatibleProvider` (LM Studio, OpenAI, Google, OpenRouter; server-sent events from `/chat/completions`) and `AnthropicProvider` (Messages API with streaming and server-side fallback on a decline). Keys live in the keychain. Lens can use its own service and model.
+
+## Wardrobe and animation
+
+`WardrobeItem` and `WardrobeProgress` (core, tested) decide what's earned; `Appearance.outfit` keeps one item per slot and stays compatible with saves that only have `accessory`. `CreatureView` keeps the pixel grid but animates between pixels: breathing and squash-and-stretch transforms around the feet, eyes that follow the pointer (it finds its window through `WindowReader`), uneven blinks, a ground shadow, and particles drawn in an overlay canvas from a deterministic per-index random, so the same time always draws the same frame. `--render-creature` renders frames offline with a fixed clock.
 
 ## Claude Code and Codex
 

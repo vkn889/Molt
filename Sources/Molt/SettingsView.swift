@@ -11,7 +11,9 @@ struct SettingsView: View {
   @ObservedObject var appleMusic: AppleMusicLibrary
   @ObservedObject var account: AccountController
   @Binding var accent: String
+  @ObservedObject var assistant: AssistantController
   @State private var showingAccount = false
+  @State private var showingShortcuts = false
   init(controller: PetController, coordinator: IslandCoordinator, accent: Binding<String>) {
     self.controller = controller
     self.coordinator = coordinator
@@ -19,6 +21,7 @@ struct SettingsView: View {
     self.spotify = controller.hub.library.spotify
     self.appleMusic = controller.hub.library.appleMusic
     self.account = controller.account
+    self.assistant = controller.assistant
     _accent = accent
   }
   var body: some View {
@@ -87,8 +90,31 @@ struct SettingsView: View {
             Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
           }.contentShape(Rectangle())
         }.buttonStyle(.plain)
-        toggle("Claude Code & Codex", $sessions.enabled)
-        toggle("Keep copies of chats", $sessions.archive).disabled(!sessions.enabled)
+        link("Agents, usage & GitHub", symbol: "terminal.fill") {
+          UserDefaults.standard.set("Setup", forKey: "agentsTab"); controller.tab = "Agents"
+        }
+        HStack {
+          Text("Lens model").font(.system(size: 11)).foregroundStyle(Color.white.opacity(0.8))
+          Spacer()
+          Picker("Lens model", selection: $assistant.lensChoice) {
+            Text("Same as Chat").tag("")
+            ForEach(assistant.lensOptions, id: \.id) { option in Text(option.title).tag(option.id) }
+            if !assistant.lensChoice.isEmpty && !assistant.lensOptions.contains(where: { $0.id == assistant.lensChoice }) {
+              Text(assistant.lensChoice.replacingOccurrences(of: "|", with: " · ")).tag(assistant.lensChoice)
+            }
+          }.labelsHidden().controlSize(.small).frame(width: 110)
+        }
+        link("Keyboard shortcuts", symbol: "keyboard") { showingShortcuts.toggle() }
+          .popover(isPresented: $showingShortcuts, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 5) {
+              ForEach(IslandCoordinator.shortcutList, id: \.0) { item in
+                HStack {
+                  Text(item.0).font(.system(size: 11, weight: .semibold, design: .rounded)).frame(width: 44, alignment: .leading)
+                  Text(item.1).font(.system(size: 11))
+                }
+              }
+            }.padding(12)
+          }
         connection("Spotify", connected: spotify.connected, detail: spotify.userName,
           connect: { controller.tab = "Notch"; controller.hub.library.source = .spotify },
           disconnect: spotify.disconnect)
@@ -99,6 +125,16 @@ struct SettingsView: View {
     .padding(.horizontal, 22).padding(.top, 8).padding(.bottom, 14)
   }
 
+  private func link(_ title: String, symbol: String, action: @escaping () -> Void) -> some View {
+    Button(action: action) {
+      HStack(spacing: 6) {
+        Image(systemName: symbol).font(.system(size: 10)).foregroundStyle(Color.accentColor)
+        Text(title).font(.system(size: 11)).foregroundStyle(Color.white.opacity(0.8)).lineLimit(1)
+        Spacer(minLength: 4)
+        Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
+      }.contentShape(Rectangle())
+    }.buttonStyle(.plain)
+  }
   private func column<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
     VStack(alignment: .leading, spacing: 5) {
       Text(title).font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)

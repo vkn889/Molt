@@ -5,15 +5,18 @@ import SwiftUI
 /// Claude Code and Codex conversations, with today's usage, in the same footprint as Home.
 struct SessionsView: View {
   @ObservedObject var sessions: SessionsController
+  /// Inside the Agents page, which already has its own padding and usage tab.
+  var compact = false
+  @State private var showingChanges = false
   var body: some View {
     Group {
       if sessions.enabled {
         HStack(alignment: .top, spacing: 12) {
           VStack(alignment: .leading, spacing: 8) {
-            usage
+            if !compact { usage }
             list
-          }.frame(width: 270)
-          transcript
+          }.frame(width: 250)
+          if showingChanges { changesPanel } else { transcript }
         }
       } else {
         HStack(spacing: 18) {
@@ -27,8 +30,9 @@ struct SessionsView: View {
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
       }
     }
-    .padding(.horizontal, 22).padding(.top, 8).padding(.bottom, 14)
+    .padding(.horizontal, compact ? 0 : 22).padding(.top, compact ? 0 : 8).padding(.bottom, compact ? 0 : 14)
     .onAppear { sessions.scan() }
+    .onChange(of: sessions.selected) { _ in if showingChanges { sessions.loadChanges() } }
   }
 
   private var usage: some View {
@@ -89,6 +93,8 @@ struct SessionsView: View {
           Text(session.title).font(.system(size: 12, weight: .semibold)).lineLimit(1)
           Spacer(minLength: 4)
           Text("\(session.messages) messages · \(Self.compact(session.tokens)) tokens").font(.system(size: 10)).foregroundStyle(.secondary)
+          Button { showingChanges = true; sessions.loadChanges() } label: { Image(systemName: "plusminus").font(.system(size: 11, weight: .semibold)) }
+            .buttonStyle(NotchIconButtonStyle(size: 22)).help("Files the agent changed").accessibilityLabel("Files the agent changed")
           Button { sessions.reveal(session) } label: { Image(systemName: "folder").font(.system(size: 11, weight: .semibold)) }
             .buttonStyle(NotchIconButtonStyle(size: 22)).help("Show file in Finder").accessibilityLabel("Show file in Finder")
           Button(action: sessions.openArchive) { Image(systemName: "archivebox").font(.system(size: 11, weight: .semibold)) }
@@ -116,6 +122,59 @@ struct SessionsView: View {
       } else {
         Text("Pick a conversation.").font(.system(size: 11)).foregroundStyle(.secondary)
           .frame(maxWidth: .infinity, maxHeight: .infinity)
+      }
+    }
+    .padding(10)
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    .background(NotchSurface(radius: 14))
+  }
+  private var changesPanel: some View {
+    VStack(alignment: .leading, spacing: 6) {
+      HStack(spacing: 6) {
+        Button { if sessions.diff != nil { sessions.closeDiff() } else { showingChanges = false } } label: {
+          Image(systemName: "chevron.left").font(.system(size: 10, weight: .semibold))
+        }.buttonStyle(NotchIconButtonStyle(size: 20)).accessibilityLabel("Back")
+        Text(sessions.diff?.path ?? "Files changed").font(.system(size: 12, weight: .semibold)).lineLimit(1).truncationMode(.head)
+        Spacer(minLength: 4)
+        if sessions.loadingChanges { ProgressView().controlSize(.mini) }
+        let added = sessions.changes.reduce(0) { $0 + $1.added }, removed = sessions.changes.reduce(0) { $0 + $1.removed }
+        if sessions.diff == nil && !sessions.changes.isEmpty {
+          Text("+\(added)").font(.system(size: 10, weight: .semibold).monospacedDigit()).foregroundStyle(.green)
+          Text("−\(removed)").font(.system(size: 10, weight: .semibold).monospacedDigit()).foregroundStyle(.red)
+        }
+      }
+      ScrollView {
+        if let diff = sessions.diff {
+          LazyVStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(diff.text.split(separator: "\n", omittingEmptySubsequences: false).prefix(1500).enumerated()), id: \.offset) { _, line in
+              Text(String(line)).font(.system(size: 10, design: .monospaced)).lineLimit(1)
+                .foregroundStyle(line.hasPrefix("+") ? Color.green : line.hasPrefix("-") ? Color.red : line.hasPrefix("@@") ? Color.accentColor : Color.white.opacity(0.7))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background((line.hasPrefix("+") ? Color.green : line.hasPrefix("-") ? Color.red : Color.clear).opacity(0.08))
+            }
+          }.textSelection(.enabled)
+        } else {
+          LazyVStack(alignment: .leading, spacing: 2) {
+            if sessions.changes.isEmpty && !sessions.loadingChanges {
+              Text("This conversation didn't edit any files.").font(.system(size: 11)).foregroundStyle(.secondary)
+            }
+            ForEach(sessions.changes) { change in
+              Button { sessions.showDiff(change) } label: {
+                HStack(spacing: 6) {
+                  Image(systemName: "doc.text").font(.system(size: 10)).foregroundStyle(.secondary)
+                  Text(change.path).font(.system(size: 11)).lineLimit(1).truncationMode(.head)
+                  Spacer(minLength: 4)
+                  if change.added + change.removed == 0 {
+                    Text("committed").font(.system(size: 9)).foregroundStyle(.secondary)
+                  } else {
+                    Text("+\(change.added)").font(.system(size: 10).monospacedDigit()).foregroundStyle(.green)
+                    Text("−\(change.removed)").font(.system(size: 10).monospacedDigit()).foregroundStyle(.red)
+                  }
+                }.padding(.vertical, 2).contentShape(Rectangle())
+              }.buttonStyle(.plain)
+            }
+          }
+        }
       }
     }
     .padding(10)

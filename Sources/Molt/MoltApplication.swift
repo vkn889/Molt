@@ -165,6 +165,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       }
       return
     }
+    if CommandLine.arguments.contains("--agents-selftest") {
+      // Development check of the agent bridge: runs only the loopback server, prints its token,
+      // and answers each approval after a second so the reply path can be exercised.
+      Task { @MainActor in
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("molt-agents-\(UUID())")
+        let agents = AgentController(directory: root)
+        agents.saved.terminalFirst = false
+        agents.start()
+        print("TOKEN " + (UserDefaults.standard.string(forKey: "agentToken") ?? ""))
+        fflush(stdout)
+        for _ in 0..<200 {
+          try? await Task.sleep(nanoseconds: 100_000_000)
+          for item in agents.pending where Date().timeIntervalSince(item.received) > 0.8 { agents.allow(item.id) }
+        }
+        print("LIVE " + agents.live.values.map { "\($0.agent):\($0.status.rawValue):\($0.project)" }.sorted().joined(separator: ","))
+        print("FINISHED \(agents.finished.count) TASKS \(agents.saved.tasksFinished)")
+        exit(0)
+      }
+      app.run()
+      return
+    }
+    if let index = CommandLine.arguments.firstIndex(of: "--render-creature"),
+      CommandLine.arguments.count > index + 1
+    {
+      do { try renderCreature(to: URL(fileURLWithPath: CommandLine.arguments[index + 1])) } catch {
+        fputs("Creature failed: \(error)\n", stderr)
+        exit(1)
+      }
+      return
+    }
     if let index = CommandLine.arguments.firstIndex(of: "--render-preview"),
       CommandLine.arguments.count > index + 1
     {
@@ -177,6 +207,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let delegate = AppDelegate()
     app.delegate = delegate
     withExtendedLifetime(delegate) { app.run() }
+  }
+  static func argument(_ flag: String) -> String? {
+    guard let index = CommandLine.arguments.firstIndex(of: flag), CommandLine.arguments.count > index + 1 else { return nil }
+    return CommandLine.arguments[index + 1]
+  }
+  /// Renders Molt frame by frame as transparent PNGs, for videos: `--render-creature <folder>
+  /// --mood happy --frames 60 --fps 30 --size 280 --outfit hat,scarf --shell claude --palette sage`.
+  @MainActor static func renderCreature(to folder: URL) throws {
+    NSApp.setActivationPolicy(.accessory)
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    let mood = argument("--mood") ?? "idle"
+    let frames = Int(argument("--frames") ?? "60") ?? 60
+    let fps = Double(argument("--fps") ?? "30") ?? 30
+    let side = CGFloat(Double(argument("--size") ?? "280") ?? 280)
+    var appearance = Appearance()
+    appearance.palette = argument("--palette") ?? "sage"
+    if let outfit = argument("--outfit") { appearance.outfit = outfit.split(separator: ",").map(String.init) }
+    let shell = argument("--shell").flatMap { AgentKind.find($0) == nil ? nil : MoltTheme.agent($0) }
+    let pokeAt = argument("--poke").flatMap(Double.init)
+    let walking = CommandLine.arguments.contains("--walking")
+    // Molt fills the middle of a larger transparent square, leaving room for particles.
+    let canvas = side * 2.2
+    for frame in 0..<frames {
+      let t = 1000 + Double(frame) / fps
+      let poked = pokeAt.map { Date(timeIntervalSinceReferenceDate: 1000 + $0) }
+      let view = CreatureView(appearance: appearance, mood: mood, walking: walking, shell: shell, poked: poked, followsPointer: false, clock: t)
+        .frame(width: side, height: side * 13 / 14)
+        .frame(width: canvas, height: canvas)
+      let host = NSHostingView(rootView: view)
+      host.frame = NSRect(x: 0, y: 0, width: canvas, height: canvas)
+      let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+      window.backgroundColor = .clear
+      window.isOpaque = false
+      window.contentView = host
+      host.layoutSubtreeIfNeeded()
+      RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+      guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { throw MoltError.invalid("No bitmap.") }
+      host.cacheDisplay(in: host.bounds, to: rep)
+      guard let data = rep.representation(using: .png, properties: [:]) else { throw MoltError.invalid("No PNG.") }
+      try data.write(to: folder.appendingPathComponent(String(format: "frame-%04d.png", frame)), options: .atomic)
+    }
+    print("Rendered \(frames) frames to \(folder.path)")
   }
   @MainActor static func renderPreview(to url: URL) throws {
     NSApp.setActivationPolicy(.accessory)
@@ -197,8 +269,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
     for (flag, tab) in [
       ("--hub", "Hub"), ("--play", "Play"), ("--sessions", "Sessions"), ("--chat", "Ask Molt"), ("--settings", "Settings"),
-      ("--molting", "Molting"), ("--lens", "Lens"), ("--health", "Health"),
+      ("--molting", "Molting"), ("--lens", "Lens"), ("--health", "Health"), ("--agents", "Agents"), ("--wardrobe", "Wardrobe"),
     ] where CommandLine.arguments.contains(flag) { controller.tab = tab }
+    if let value = argument("--agents-tab") { UserDefaults.standard.set(value, forKey: "agentsTab") }
+    if CommandLine.arguments.contains("--demo") {
+      controller.agents.loadDemo(approval: CommandLine.arguments.contains("--approval"))
+      controller.plans.loadDemo()
+      controller.github.loadDemo()
+    }
+    if let value = argument("--outfit") {
+      controller.changeCompanion { $0.appearance.outfit = value.split(separator: ",").map(String.init); $0.inventory += value.split(separator: ",").map(String.init) }
+    }
+    if let value = argument("--palette") { controller.changeCompanion { $0.appearance.palette = value } }
     if CommandLine.arguments.contains("--edit") { controller.hub.editing = true }
     if CommandLine.arguments.contains("--signed-out") { controller.account.previewSignedOut() }
     if let index = CommandLine.arguments.firstIndex(of: "--widgets"), CommandLine.arguments.count > index + 1 {
@@ -213,7 +295,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     controller.refreshHealth()
     Thread.sleep(forTimeInterval: 0.3)
     controller.refreshHealth()
-    if controller.tab == "Sessions" {
+    if controller.tab == "Sessions" || (controller.tab == "Agents" && argument("--agents-tab") == "Chats") {
       controller.hub.sessions.archive = false
       controller.hub.sessions.enabled = true
       let deadline = Date().addingTimeInterval(60)
@@ -221,6 +303,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       RunLoop.main.run(until: Date().addingTimeInterval(0.5))
     }
     let coordinator = IslandCoordinator(controller: controller, preview: true)
+    if let value = argument("--banner") {
+      switch value {
+      case "approval": coordinator.preview(banner: .approval(controller.agents.pending.first?.id ?? UUID()))
+      case "finished": coordinator.preview(banner: .finished(controller.agents.finished.first ?? AgentController.Finished(agent: "codex", project: "website", message: "Pushed to main · 48 tests passed", duration: 252, date: Date())))
+      case "habit": coordinator.preview(banner: .habit("Bash(npm test)"))
+      case "wings": coordinator.preview(banner: nil)
+      default: coordinator.preview(banner: .message("molt/molt · main checks failed", symbol: "xmark.octagon.fill"))
+      }
+    } else if CommandLine.arguments.contains("--approval") {
+      coordinator.preview(banner: .approval(controller.agents.pending.first?.id ?? UUID()), expanded: true)
+    }
     let rootView =
       AnyView(
         ZStack(alignment: .top) {

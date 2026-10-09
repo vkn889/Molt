@@ -8,6 +8,8 @@ public struct Appearance: Codable, Equatable {
   public var fins = "leaf"
   public var tail = "curl"
   public var body = "round"
+  /// Items worn, one per wardrobe slot. Absent in saves from before the wardrobe.
+  public var worn: [String]?
   public init() {}
 }
 public struct MemoryEvent: Codable, Identifiable {

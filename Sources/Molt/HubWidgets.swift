@@ -241,6 +241,10 @@ struct WidgetKind: Identifiable {
     WidgetKind(id: "lens", title: "Lens", symbol: "text.viewfinder", spans: [1], blurb: "Ask about your screen"),
     WidgetKind(id: "molt", title: "Molt", symbol: "leaf.fill", spans: [1], blurb: "Molt's mood and needs"),
     WidgetKind(id: "agentUsage", title: "Agent usage", symbol: "terminal.fill", spans: [1], blurb: "Claude Code and Codex tokens"),
+    WidgetKind(id: "agents", title: "Agents", symbol: "bolt.fill", spans: [1], blurb: "Who's working and who needs you"),
+    WidgetKind(id: "planUsage", title: "Plan usage", symbol: "gauge.with.dots.needle.67percent", spans: [1, 2], blurb: "Claude and Codex limits, with a forecast"),
+    WidgetKind(id: "weekRecap", title: "Your week", symbol: "sparkles.rectangle.stack.fill", spans: [2], blurb: "A recap card you can share"),
+    WidgetKind(id: "github", title: "GitHub", symbol: "arrow.triangle.pull", spans: [1, 2], blurb: "PRs, checks and your streak"),
     WidgetKind(id: "upNext", title: "Up next", symbol: "calendar", spans: [1, 2], blurb: "Your next events"),
     WidgetKind(id: "macHealth", title: "Mac health", symbol: "cpu", spans: [1], blurb: "Battery, CPU, memory, storage"),
     WidgetKind(id: "nowPlaying", title: "Now playing", symbol: "music.note", spans: [1, 2], blurb: "Music controls"),
@@ -269,6 +273,10 @@ struct WidgetView: View {
     case "lens": LensTile(open: { hub.actions.onLens() })
     case "molt": MoltTile(controller: controller)
     case "agentUsage": AgentUsageTile(sessions: hub.sessions)
+    case "agents": AgentsTile(controller: controller, agents: controller.agents)
+    case "planUsage": PlanUsageTile(plans: controller.plans, span: widget.span, open: { show(controller, "Usage") })
+    case "weekRecap": WeekRecapTile(controller: controller, agents: controller.agents, github: controller.github, sessions: hub.sessions)
+    case "github": GitHubTile(github: controller.github, span: widget.span, open: { show(controller, "GitHub") })
     case "upNext": UpNextTile(controller: controller, contexts: controller.contexts, span: widget.span)
     case "macHealth": MacHealthTile(controller: controller)
     case "nowPlaying": NowPlayingTile(media: hub.media, span: widget.span)
@@ -277,6 +285,211 @@ struct WidgetView: View {
     case "downloads": DownloadsTile(span: widget.span)
     case "quickNote": QuickNoteTile(hub: hub)
     default: WebSearchTile(span: widget.span)
+    }
+  }
+}
+
+@MainActor private func show(_ controller: PetController, _ tab: String) {
+  UserDefaults.standard.set(tab, forKey: "agentsTab")
+  controller.tab = "Agents"
+}
+
+// MARK: Developer widgets
+
+struct AgentsTile: View {
+  @ObservedObject var controller: PetController
+  @ObservedObject var agents: AgentController
+  var body: some View {
+    Button { show(controller, "Live") } label: {
+      Tile(title: "Agents", icon: "bolt.fill") {
+        HStack(spacing: 8) {
+          CreatureView(appearance: controller.companion.appearance, mood: agents.mood ?? "idle", shell: controller.shellColor, followsPointer: false)
+            .frame(width: 52, height: 48)
+          VStack(alignment: .leading, spacing: 1) {
+            Text(agents.needsYou ? "Needs you" : agents.working.isEmpty ? "All quiet" : "\(agents.working.count) working")
+              .font(.system(size: 13, weight: .semibold)).foregroundStyle(agents.needsYou ? .orange : .white)
+            Text(agents.working.first?.project ?? "\(agents.saved.tasksFinished) tasks done").font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
+          }
+        }
+        Spacer(minLength: 0)
+        if let last = agents.finished.first {
+          Text("\(AgentKind.find(last.agent)?.name ?? "Agent") finished \(last.date.formatted(.relative(presentation: .named)))")
+            .font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(1)
+        }
+      }.contentShape(Rectangle())
+    }.buttonStyle(.plain)
+  }
+}
+
+struct PlanUsageTile: View {
+  @ObservedObject var plans: PlanController
+  var span: Int
+  var open: () -> Void
+  var body: some View {
+    Button(action: open) {
+      Tile(title: "Plan usage", icon: "gauge.with.dots.needle.67percent") {
+        if plans.all.isEmpty {
+          Text("Claude and Codex limits appear here.").font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+          Spacer(minLength: 0)
+          Text("Set up in Agents › Usage").font(.system(size: 10)).foregroundStyle(Color.accentColor)
+        } else if span == 2 {
+          HStack(alignment: .top, spacing: 12) {
+            ForEach(plans.all, id: \.tool) { limits in
+              VStack(alignment: .leading, spacing: 5) {
+                Text(limits.tool).font(.system(size: 11, weight: .semibold)).foregroundStyle(limits.tool == "Codex" ? .teal : .orange)
+                if let window = limits.session { LimitBar(title: "5 hours", window: window, tint: limits.tool == "Codex" ? .teal : .orange) }
+                if let window = limits.week { LimitBar(title: "Week", window: window, tint: limits.tool == "Codex" ? .teal : .orange, compact: true) }
+              }
+            }
+          }
+        } else {
+          VStack(alignment: .leading, spacing: 6) {
+            ForEach(plans.all, id: \.tool) { limits in
+              if let window = limits.session ?? limits.week {
+                LimitBar(title: limits.tool, window: window, tint: limits.tool == "Codex" ? .teal : .orange, compact: true)
+              }
+            }
+          }
+          Spacer(minLength: 0)
+          if let window = plans.all.compactMap(\.session).max(by: { $0.used < $1.used }) {
+            Text(PlanController.pace(window)).font(.system(size: 9)).foregroundStyle(window.forecast(now: Date()) != nil ? Color.orange : Color.secondary).lineLimit(1)
+          }
+        }
+      }.contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .onAppear { plans.refresh() }
+  }
+}
+
+struct GitHubTile: View {
+  @ObservedObject var github: GitHubController
+  var span: Int
+  var open: () -> Void
+  var body: some View {
+    Button(action: open) {
+      Tile(title: "GitHub", icon: "arrow.triangle.pull") {
+        if let summary = github.summary {
+          HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+              HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text("\(summary.streak)").font(.system(size: 24, weight: .semibold).monospacedDigit())
+                Text("day streak").font(.system(size: 10)).foregroundStyle(.secondary)
+              }
+              row("arrow.triangle.pull", "My PRs", "\(summary.mine.count)", .white)
+              row("eye", "To review", "\(summary.reviews.count)", summary.waiting(now: Date()).isEmpty ? .white : .orange)
+              row("circle.fill", summary.branch ?? "CI", GitHubPanel.label(summary.ci), GitHubPanel.color(summary.ci))
+            }
+            if span == 2 { ContributionGrid(days: summary.days, weeks: 16).frame(maxWidth: .infinity) }
+          }
+        } else {
+          Text(github.enabled ? (github.status.isEmpty ? "Loading…" : github.status) : "Your PRs, checks and streak.")
+            .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+          Spacer(minLength: 0)
+          if !github.enabled { Text("Turn on").font(.system(size: 11, weight: .semibold)).foregroundStyle(Color.accentColor) }
+        }
+      }.contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .onAppear { github.refresh() }
+  }
+  private func row(_ symbol: String, _ title: String, _ value: String, _ tint: Color) -> some View {
+    HStack(spacing: 5) {
+      Image(systemName: symbol).font(.system(size: symbol == "circle.fill" ? 6 : 9)).foregroundStyle(tint == .white ? Color.secondary : tint).frame(width: 12)
+      Text(title).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
+      Spacer(minLength: 2)
+      Text(value).font(.system(size: 10, weight: .semibold).monospacedDigit()).foregroundStyle(tint)
+    }
+  }
+}
+
+/// The week at a glance, in a card that saves as a picture to share.
+struct WeekRecapTile: View {
+  @ObservedObject var controller: PetController
+  @ObservedObject var agents: AgentController
+  @ObservedObject var github: GitHubController
+  @ObservedObject var sessions: SessionsController
+  @State private var saved = ""
+  var body: some View {
+    ZStack(alignment: .topTrailing) {
+      WeekRecapCard(recap: recap)
+      Button(action: share) {
+        Label(saved.isEmpty ? "Share" : saved, systemImage: saved.isEmpty ? "square.and.arrow.up" : "checkmark")
+          .font(.system(size: 10, weight: .semibold)).padding(.horizontal, 8).frame(height: 20)
+          .background(Capsule().fill(Color.white.opacity(0.12)))
+      }
+      .buttonStyle(.plain).padding(10).help("Save this card to your Desktop and copy it")
+    }
+    .onAppear { sessions.scan() }
+  }
+  private var recap: WeekRecap {
+    let week = Calendar.current.startOfDay(for: Date()).addingTimeInterval(-6 * 86400)
+    return WeekRecap(
+      appearance: controller.companion.appearance, name: controller.petName, level: controller.companion.experience / 100 + 1,
+      tokens: sessions.tokens(since: week), tasks: agents.finishedThisWeek,
+      contributions: github.summary.map { $0.days.suffix(7).reduce(0) { $0 + $1.count } }, streak: github.summary?.streak)
+  }
+  private func share() {
+    let renderer = ImageRenderer(content: WeekRecapCard(recap: recap, poster: true).frame(width: 600, height: 315).environment(\.colorScheme, .dark))
+    renderer.scale = 2
+    guard let image = renderer.nsImage, let tiff = image.tiffRepresentation,
+      let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:])
+    else { return }
+    let name = "Molt week \(Date().formatted(.dateTime.year().month().day())).png".replacingOccurrences(of: "/", with: "-")
+    let url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Desktop").appendingPathComponent(name)
+    try? png.write(to: url, options: .atomic)
+    NSPasteboard.general.clearContents()
+    NSPasteboard.general.writeObjects([image])
+    saved = "Saved"
+  }
+}
+
+struct WeekRecap {
+  var appearance: Appearance
+  var name: String
+  var level: Int
+  var tokens: Int
+  var tasks: Int
+  var contributions: Int?
+  var streak: Int?
+}
+
+struct WeekRecapCard: View {
+  var recap: WeekRecap
+  /// The shareable version: its own background and a little more room.
+  var poster = false
+  var body: some View {
+    HStack(spacing: poster ? 24 : 14) {
+      CreatureView(appearance: recap.appearance, mood: "celebrating", moving: !poster, followsPointer: false, clock: poster ? 1000.2 : nil)
+        .frame(width: poster ? 150 : 70, height: poster ? 140 : 65)
+      VStack(alignment: .leading, spacing: poster ? 10 : 5) {
+        Text("\(recap.name)'s week").font(.system(size: poster ? 26 : 13, weight: .semibold))
+        HStack(spacing: poster ? 22 : 10) {
+          stat(SessionsView.compact(recap.tokens), "agent tokens")
+          stat("\(recap.tasks)", "tasks done")
+          if poster, let contributions = recap.contributions { stat("\(contributions)", "contributions") }
+          if let streak = recap.streak { stat("\(streak)", "day streak") }
+        }
+        Text("Level \(recap.level) · made with Molt").font(.system(size: poster ? 13 : 9)).foregroundStyle(.secondary)
+      }
+      Spacer(minLength: 0)
+    }
+    .padding(poster ? 34 : 12)
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+    .background(
+      Group {
+        if poster {
+          LinearGradient(colors: [Color(red: 0.08, green: 0.1, blue: 0.16), Color(red: 0.12, green: 0.2, blue: 0.16)], startPoint: .topLeading, endPoint: .bottomTrailing)
+        } else {
+          NotchSurface(radius: 16)
+        }
+      })
+    .foregroundStyle(.white)
+  }
+  private func stat(_ value: String, _ label: String) -> some View {
+    VStack(alignment: .leading, spacing: 0) {
+      Text(value).font(.system(size: poster ? 30 : 17, weight: .semibold).monospacedDigit())
+      Text(label).font(.system(size: poster ? 12 : 9)).foregroundStyle(.secondary).lineLimit(1).fixedSize()
     }
   }
 }

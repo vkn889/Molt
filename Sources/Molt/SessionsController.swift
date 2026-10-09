@@ -56,6 +56,66 @@ import SwiftUI
       }
     }
   }
+  struct FileChange: Identifiable, Equatable {
+    var id: String { path }
+    var path: String
+    var added: Int
+    var removed: Int
+  }
+  @Published private(set) var changes: [FileChange] = []
+  @Published private(set) var changesDirectory = ""
+  @Published private(set) var diff: (path: String, text: String)?
+  @Published private(set) var loadingChanges = false
+
+  /// Files the agent edited in the selected conversation, with what's still uncommitted in each.
+  func loadChanges() {
+    guard let session = selectedSession else { changes = []; return }
+    loadingChanges = true
+    diff = nil
+    let path = session.path, tool = session.tool, id = session.id
+    Task {
+      let result = await Task.detached(priority: .userInitiated) { () -> (String, [FileChange]) in
+        guard let data = FileManager.default.contents(atPath: path) else { return ("", []) }
+        let lines = String(decoding: data, as: UTF8.self).components(separatedBy: .newlines)
+        var directory = ""
+        for line in lines.prefix(400) where line.contains("\"cwd\"") {
+          guard let row = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any] else { continue }
+          directory = row["cwd"] as? String ?? (row["payload"] as? [String: Any])?["cwd"] as? String ?? ""
+          if !directory.isEmpty { break }
+        }
+        let files = AgentChanges.files(lines: lines, tool: tool).map { file -> String in
+          file.hasPrefix(directory + "/") ? String(file.dropFirst(directory.count + 1)) : file
+        }
+        guard !directory.isEmpty, !files.isEmpty else { return (directory, []) }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = ["-C", directory, "diff", "--numstat", "HEAD", "--"] + files.prefix(80)
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        var stats: [String: (added: Int, removed: Int)] = [:]
+        if (try? process.run()) != nil {
+          let output = pipe.fileHandleForReading.readDataToEndOfFile()
+          process.waitUntilExit()
+          stats = AgentChanges.numstat(String(decoding: output, as: UTF8.self))
+        }
+        return (directory, files.map { FileChange(path: $0, added: stats[$0]?.added ?? 0, removed: stats[$0]?.removed ?? 0) })
+      }.value
+      guard self.selected == id else { return }
+      self.changesDirectory = result.0
+      self.changes = result.1
+      self.loadingChanges = false
+    }
+  }
+  func showDiff(_ change: FileChange) {
+    let directory = changesDirectory
+    Task {
+      let text = await QuickActions.output("/usr/bin/git", ["-C", directory, "diff", "HEAD", "--", change.path])
+      diff = (change.path, text.isEmpty ? "No uncommitted changes in this file. They may already be committed." : String(text.prefix(60_000)))
+    }
+  }
+  func closeDiff() { diff = nil }
+
   func reveal(_ session: AgentSession) {
     NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: session.path)])
   }

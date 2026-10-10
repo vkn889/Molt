@@ -117,7 +117,16 @@ import SwiftUI
     generation = Task {
       defer { if requestID == id { running = false } }
       do {
-        let available = try await ollama.compatibleModels()
+        var available: [LocalModel]
+        do {
+          available = try await ollama.compatibleModels()
+        } catch {
+          // Installed but not running: start it in the background and try again.
+          guard Self.ollamaInstalled, await Self.startOllama() else { throw error }
+          guard requestID == id else { return }
+          status = "Started Ollama. Connecting…"
+          available = try await ollama.compatibleModels()
+        }
         guard requestID == id else { return }
         models = available
         if !models.contains(where: { $0.id == selectedModel }) {
@@ -152,10 +161,57 @@ import SwiftUI
       } catch { if requestID == id { status = error.localizedDescription } }
     }
   }
+  /// Whether Chat can answer right now.
+  var ready: Bool { !selectedModel.isEmpty && (!serviceInfo.needsKey || hasKey(service)) }
+  static var ollamaInstalled: Bool {
+    ["/Applications/Ollama.app", NSHomeDirectory() + "/Applications/Ollama.app"].contains { FileManager.default.fileExists(atPath: $0) }
+      || FileManager.default.isExecutableFile(atPath: "/usr/local/bin/ollama") || FileManager.default.isExecutableFile(atPath: "/opt/homebrew/bin/ollama")
+  }
+  /// Opens Ollama hidden and waits up to 15 seconds for it to answer.
+  static func startOllama() async -> Bool {
+    if FileManager.default.fileExists(atPath: "/Applications/Ollama.app") || FileManager.default.fileExists(atPath: NSHomeDirectory() + "/Applications/Ollama.app") {
+      _ = await QuickActions.output("/usr/bin/open", ["-g", "-a", "Ollama"])
+    } else {
+      for path in ["/opt/homebrew/bin/ollama", "/usr/local/bin/ollama"] where FileManager.default.isExecutableFile(atPath: path) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: path)
+        process.arguments = ["serve"]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try? process.run()
+        break
+      }
+    }
+    let probe = OllamaProvider()
+    for _ in 0..<30 {
+      if (try? await probe.models()) != nil { return true }
+      try? await Task.sleep(nanoseconds: 500_000_000)
+    }
+    return false
+  }
+  /// Switches Chat to Ollama on this Mac, starting it if needed.
+  func useOllama() { if service == "ollama" { refresh() } else { service = "ollama" } }
   func send() {
-    guard !running, !selectedModel.isEmpty,
-      !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    else { return }
+    guard !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+    // Still connecting: send as soon as the connection is ready instead of dropping the message.
+    if running {
+      guard reply.isEmpty, conversation.last?.role != "user" else { return }
+      status = "Connecting to \(serviceInfo.name)… your message will send next."
+      Task { @MainActor [weak self] in
+        for _ in 0..<150 {
+          try? await Task.sleep(nanoseconds: 100_000_000)
+          guard let self else { return }
+          if !self.running { self.send(); return }
+        }
+      }
+      return
+    }
+    guard ready else {
+      status = serviceInfo.needsKey && !hasKey(service)
+        ? "Add your \(serviceInfo.name) key above, or use Ollama on this Mac." : "Connecting to \(serviceInfo.name) first…"
+      if !serviceInfo.needsKey || hasKey(service) { refresh() }
+      return
+    }
     let id = UUID()
     requestID = id
     let question = String(draft.prefix(8000))
@@ -226,8 +282,25 @@ import SwiftUI
     if parts.count == 2, let info = ChatService.find(parts[0]), !info.needsKey || hasKey(info.id) {
       return provider(for: info.id).stream(model: parts[1], messages: messages)
     }
-    guard !selectedModel.isEmpty else { return nil }
-    return provider.stream(model: selectedModel, messages: messages)
+    if ready { return provider.stream(model: selectedModel, messages: messages) }
+    // Chat isn't set up: Lens still answers with Ollama on this Mac when it's installed.
+    guard Self.ollamaInstalled else { return nil }
+    let ollama = self.ollama
+    let preferred = UserDefaults.standard.string(forKey: Self.modelKey("ollama")) ?? ""
+    return AsyncThrowingStream { continuation in
+      let task = Task {
+        do {
+          var models = try? await ollama.compatibleModels()
+          if models == nil, await Self.startOllama() { models = try await ollama.compatibleModels() }
+          guard let models, let model = models.first(where: { $0.id == preferred }) ?? models.first else {
+            throw InferenceError.server("Set up Chat first: choose a service and a model.")
+          }
+          for try await token in ollama.stream(model: model.id, messages: messages) { continuation.yield(token) }
+          continuation.finish()
+        } catch { continuation.finish(throwing: error) }
+      }
+      continuation.onTermination = { @Sendable _ in task.cancel() }
+    }
   }
   /// Models Lens can use: the current service's, as "service|model".
   var lensOptions: [(id: String, title: String)] {

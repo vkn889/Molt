@@ -165,6 +165,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       }
       return
     }
+    if CommandLine.arguments.contains("--chat-selftest") {
+      // Development check of Chat and Lens against the services on this Mac. Uses its own folder
+      // and the debug build's own preferences.
+      Task { @MainActor in
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("molt-chat-\(UUID())")
+        let assistant = AssistantController(directory: root)
+        // Like a fresh setup with a cloud service chosen and no key: Lens should still answer.
+        assistant.service = "openrouter"
+        print("openrouter ready: \(assistant.ready)")
+        if let stream = assistant.answer([InferenceMessage(role: "user", content: "Reply with just: Lens works")]) {
+          var text = ""
+          do { for try await token in stream { text += token } } catch { text = "error: \(error.localizedDescription)" }
+          print("lens fallback: \(text.trimmingCharacters(in: .whitespacesAndNewlines))")
+        } else {
+          print("lens fallback: none")
+        }
+        assistant.service = "ollama"
+        for _ in 0..<60 where !assistant.ready { try? await Task.sleep(nanoseconds: 250_000_000) }
+        print("ollama ready: \(assistant.ready) model: \(assistant.selectedModel)")
+        assistant.draft = "Reply with just: Chat works"
+        assistant.send()
+        for _ in 0..<240 {
+          try? await Task.sleep(nanoseconds: 250_000_000)
+          if !assistant.running, assistant.conversation.last?.role == "assistant" { break }
+        }
+        print("chat: \(assistant.conversation.last?.content ?? "(none)") | status: \(assistant.status)")
+        exit(0)
+      }
+      app.run()
+      return
+    }
     if CommandLine.arguments.contains("--agents-selftest") {
       // Development check of the agent bridge: runs only the loopback server, prints its token,
       // and answers each approval after a second so the reply path can be exercised.

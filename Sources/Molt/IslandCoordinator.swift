@@ -96,6 +96,7 @@ import SwiftUI
       .sink { [weak self] active in self?.setLiveActivity(active) }
       .store(in: &subscriptions)
     lens.hide = { [weak self] in self?.collapse() }
+    lens.openChat = { [weak controller] in controller?.tab = "Ask Molt" }
     lens.show = { [weak self] in
       guard let self else { return }
       self.controller.tab = "Lens"

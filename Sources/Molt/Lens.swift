@@ -18,6 +18,9 @@ import Vision
   @Published var status = ""
   /// Screen Recording isn't granted (or macOS hasn't applied the grant until Molt relaunches).
   @Published var needsPermission = false
+  /// Why the last question couldn't be answered, shown where the answer would be.
+  @Published var error = ""
+  var openChat: () -> Void = {}
   private let assistant: AssistantController
   private var generation: Task<Void, Never>?
   var hide: () -> Void = {}
@@ -90,6 +93,7 @@ import Vision
   }
   func clear() {
     generation?.cancel()
+    error = ""
     image = nil
     text = ""
     labels = []
@@ -124,9 +128,10 @@ import Vision
     let asked = (prompt ?? question).trimmingCharacters(in: .whitespacesAndNewlines)
     guard !asked.isEmpty, image != nil, !running else { return }
     guard let stream = assistant.answer(messages(for: asked)) else {
-      status = "Choose a model in Chat first."
+      error = "Lens answers with the model you set up in Chat. Choose a service and a model there, or install Ollama."
       return
     }
+    error = ""
     question = prompt == nil ? "" : question
     answer = ""
     running = true
@@ -138,7 +143,7 @@ import Vision
           try Task.checkCancellation()
           answer += token
         }
-      } catch { if !Task.isCancelled { status = error.localizedDescription } }
+      } catch let failure { if !Task.isCancelled { self.error = failure.localizedDescription } }
     }
   }
   func stop() { generation?.cancel() }
@@ -197,9 +202,16 @@ struct LensView: View {
           VStack(alignment: .leading, spacing: 6) {
             chips
             ScrollView {
-              Text(lens.answer.isEmpty ? (lens.analyzing ? "Reading the selection…" : "Ask anything about it, or pick a suggestion.") : lens.answer)
-                .font(.system(size: 12)).foregroundStyle(lens.answer.isEmpty ? .secondary : Color.white)
-                .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+              if !lens.error.isEmpty && lens.answer.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                  Text(lens.error).font(.system(size: 11)).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+                  Button("Set up Chat", action: lens.openChat)
+                }.frame(maxWidth: .infinity, alignment: .leading)
+              } else {
+                Text(lens.answer.isEmpty ? (lens.analyzing ? "Reading the selection…" : lens.running ? "Thinking…" : "Ask anything about it, or pick a suggestion.") : lens.answer)
+                  .font(.system(size: 12)).foregroundStyle(lens.answer.isEmpty ? .secondary : Color.white)
+                  .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+              }
             }
             HStack(spacing: 6) {
               TextField("Ask about this", text: $lens.question).textFieldStyle(.plain).font(.system(size: 12))

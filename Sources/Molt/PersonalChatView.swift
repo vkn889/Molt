@@ -2,7 +2,7 @@ import AppKit
 import MoltCore
 import SwiftUI
 
-/// Chat with Molt through Ollama on this Mac.
+/// Chat with Molt: Ollama or LM Studio on this Mac, or a cloud service with your key.
 struct PersonalChatView: View {
   @ObservedObject var assistant: AssistantController
   @FocusState private var focused: Bool
@@ -14,8 +14,11 @@ struct PersonalChatView: View {
         ScrollView {
           LazyVStack(alignment: .leading, spacing: 6) {
             if assistant.conversation.isEmpty && assistant.reply.isEmpty {
-              Text(assistant.selectedModel.isEmpty ? "Pick a service above to start chatting." : "Ask anything.")
-                .font(.system(size: 12)).foregroundStyle(.secondary).padding(.top, 6)
+              if assistant.ready {
+                Text("Ask anything.").font(.system(size: 12)).foregroundStyle(.secondary).padding(.top, 6)
+              } else {
+                setup
+              }
             }
             ForEach(Array(assistant.conversation.enumerated()), id: \.offset) { index, message in
               bubble(message.content, user: message.role == "user").id(index)
@@ -43,26 +46,88 @@ struct PersonalChatView: View {
             Label(assistant.attachmentName, systemImage: "xmark").font(.system(size: 10)).lineLimit(1).frame(maxWidth: 110)
           }.buttonStyle(.plain).foregroundStyle(.secondary).help("Remove attachment")
         }
-        if assistant.selectedModel.isEmpty {
-          Button("Connect \(assistant.serviceInfo.name)", action: assistant.refresh)
-        } else if assistant.running {
+        if assistant.running {
           Button(action: assistant.cancel) { Image(systemName: "stop.fill").font(.system(size: 11, weight: .bold)) }
             .buttonStyle(NotchIconButtonStyle(size: 28, prominent: true)).accessibilityLabel("Stop")
         } else {
           Button { assistant.send() } label: { Image(systemName: "arrow.up.circle.fill").font(.system(size: 22)) }
             .buttonStyle(NotchIconButtonStyle(size: 28, prominent: true)).foregroundStyle(Color.accentColor)
-            .disabled(assistant.draft.isEmpty).accessibilityLabel("Send")
+            .disabled(assistant.draft.isEmpty || !assistant.ready).accessibilityLabel("Send")
         }
         Button(action: assistant.newConversation) { Image(systemName: "square.and.pencil").font(.system(size: 12, weight: .semibold)) }
           .buttonStyle(NotchIconButtonStyle(size: 28)).help("New chat").accessibilityLabel("New chat")
       }
-      if !assistant.status.isEmpty && assistant.selectedModel.isEmpty {
-        Text(assistant.status).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
+      // Errors and progress always show, so a request never fails silently.
+      if !assistant.status.isEmpty, !assistant.status.hasPrefix("Response complete"),
+        assistant.ready || !assistant.conversation.isEmpty || assistant.draft.isEmpty == false
+      {
+        Text(assistant.status).font(.system(size: 10)).foregroundStyle(assistant.ready ? Color.secondary : Color.orange).lineLimit(1)
           .frame(maxWidth: .infinity, alignment: .leading)
       }
     }
     .padding(.horizontal, 22).padding(.top, 8).padding(.bottom, 12)
     .onAppear { focused = true }
+  }
+  static let keyPages = [
+    "anthropic": "https://console.anthropic.com/settings/keys", "openai": "https://platform.openai.com/api-keys",
+    "google": "https://aistudio.google.com/apikey", "openrouter": "https://openrouter.ai/keys",
+  ]
+  /// What's missing for the chosen service, with the one step that fixes it.
+  @ViewBuilder private var setup: some View {
+    let info = assistant.serviceInfo
+    VStack(alignment: .leading, spacing: 6) {
+      if info.needsKey && !assistant.hasKey(info.id) {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+          Text("\(info.name) needs your API key").font(.system(size: 13, weight: .semibold))
+          Text("Messages go to \(info.name). The key stays in your keychain.").font(.system(size: 10)).foregroundStyle(.secondary)
+        }
+        HStack(spacing: 6) {
+          SecureField("Paste your key \(info.keyHint)", text: $key).textFieldStyle(.plain).font(.system(size: 11))
+            .padding(.horizontal, 8).frame(width: 200, height: 24)
+            .background(RoundedRectangle(cornerRadius: 7).fill(Color.white.opacity(0.08)))
+            .onSubmit(saveKey)
+          Button("Save", action: saveKey).disabled(key.isEmpty)
+          if let page = Self.keyPages[info.id], let url = URL(string: page) {
+            Link("Get a key", destination: url).font(.system(size: 10, weight: .semibold))
+          }
+          Spacer(minLength: 4)
+          if AssistantController.ollamaInstalled {
+            Button("Use Ollama instead", action: assistant.useOllama).buttonStyle(.plain)
+              .font(.system(size: 10, weight: .semibold)).foregroundStyle(Color.accentColor)
+          }
+        }
+      } else if info.id == "ollama" {
+        Text(AssistantController.ollamaInstalled ? "Ollama isn't running" : "Ollama isn't installed").font(.system(size: 13, weight: .semibold))
+        Text("Ollama runs models on this Mac; nothing leaves it. Molt starts it for you.").font(.system(size: 10)).foregroundStyle(.secondary)
+        HStack(spacing: 6) {
+          if AssistantController.ollamaInstalled {
+            Button(assistant.running ? "Starting…" : "Start Ollama", action: assistant.refresh).disabled(assistant.running)
+          } else {
+            Link("Get Ollama", destination: URL(string: "https://ollama.com/download")!).font(.system(size: 11, weight: .semibold))
+          }
+        }
+      } else if info.id == "lmstudio" {
+        Text("LM Studio's server isn't on").font(.system(size: 13, weight: .semibold))
+        Text("In LM Studio, load a model and turn on the local server (Developer tab), then connect.")
+          .font(.system(size: 10)).foregroundStyle(.secondary)
+        Button(assistant.running ? "Connecting…" : "Connect", action: assistant.refresh).disabled(assistant.running)
+      } else {
+        Text("Connecting to \(info.name)…").font(.system(size: 13, weight: .semibold))
+        Button("Try again", action: assistant.refresh).disabled(assistant.running)
+      }
+      if info.id != "ollama" && !info.needsKey && AssistantController.ollamaInstalled {
+        Button("Use Ollama on this Mac instead", action: assistant.useOllama).buttonStyle(.plain)
+          .font(.system(size: 10, weight: .semibold)).foregroundStyle(Color.accentColor)
+      }
+    }
+    .padding(12)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .background(NotchSurface(radius: 14))
+  }
+  private func saveKey() {
+    guard !key.isEmpty else { return }
+    assistant.setKey(key, for: assistant.service)
+    key = ""
   }
   /// Where messages go: a local server, or a cloud service with your key.
   private var services: some View {
@@ -83,12 +148,7 @@ struct PersonalChatView: View {
       }
       Spacer(minLength: 4)
       let info = assistant.serviceInfo
-      if info.needsKey && !assistant.hasKey(info.id) {
-        SecureField("\(info.name) key \(info.keyHint)", text: $key).textFieldStyle(.plain).font(.system(size: 10))
-          .padding(.horizontal, 7).frame(width: 150, height: 20)
-          .background(RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.08)))
-          .onSubmit { assistant.setKey(key, for: info.id); key = "" }
-      } else if !assistant.models.isEmpty {
+      if !assistant.models.isEmpty {
         Menu {
           ForEach(assistant.models) { model in Button(model.id) { assistant.selectedModel = model.id } }
           if info.needsKey {

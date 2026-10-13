@@ -1,3 +1,10 @@
 node_modules/
 out/
 public/molt/
+public/audio
+public/v2raw/
+public/v3/dock/
+public/v3/macbook.glb
+public/teaser/boom.mp3
+public/v4/audio/music.mp3
+public/v4/clips/

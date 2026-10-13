@@ -258,6 +258,32 @@ import UserNotifications
   }
   func dismissSummary() { hangout = nil }
 
+  /// Sample friends, people online, an invite and a loan, for screenshots and videos only.
+  func loadDemo(me: UUID, hangingOut: Bool) {
+    func person(_ name: String, _ molt: String, _ palette: String, _ social: Int) -> Profile {
+      Profile(id: UUID(), username: name, moltName: molt, palette: palette, points: social * 9, social: social, discoverable: true)
+    }
+    let maya = person("maya", "Pip", "sunset", 22), leo = person("leo.codes", "Byte", "ocean", 9), sam = person("sam", "Moss", "violet", 31)
+    let ari = person("ari", "Kiwi", "ocean", 4), noor = person("noor", "Fern", "sage", 12), jun = person("jun", "Taro", "sunset", 7)
+    friends = [
+      Friend(profile: maya, accepted: true, incoming: false), Friend(profile: leo, accepted: true, incoming: false),
+      Friend(profile: sam, accepted: true, incoming: false), Friend(profile: ari, accepted: false, incoming: true),
+    ]
+    online = [
+      maya.id.uuidString: ["username": maya.username, "doing": "Coding with Claude Code"],
+      leo.id.uuidString: ["username": leo.username, "doing": "Focusing · 18 min left"],
+      noor.id.uuidString: ["username": noor.username, "molt_name": noor.moltName, "palette": noor.palette, "social": noor.social],
+      jun.id.uuidString: ["username": jun.username, "molt_name": jun.moltName, "palette": jun.palette, "social": jun.social],
+    ]
+    invites = [Invite(id: UUID(), from: sam, received: Date())]
+    loans = [Loan(id: UUID(), owner: maya.id, borrower: me, title: "Maya's study setup", payload: Data(), expires: Date().addingTimeInterval(86400))]
+    if hangingOut {
+      hangout = Hangout(
+        id: UUID(), friend: maya, host: true, started: Date().addingTimeInterval(-94), me: CGPoint(x: 0.32, y: 0.62),
+        them: CGPoint(x: 0.62, y: 0.5), myEmote: "wave", theirEmote: "heart")
+    }
+  }
+
   private func enter(_ state: Hangout) {
     hangout = state
     let room = socket.channel("hangout:\(state.id.uuidString)")

@@ -289,6 +289,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
     print("Rendered \(frames) frames to \(folder.path)")
   }
+  /// A terminal error to show off Lens in previews.
+  static func demoLensImage() -> NSImage {
+    NSImage(size: NSSize(width: 340, height: 300), flipped: true) { rect in
+      NSColor(white: 0.11, alpha: 1).setFill()
+      rect.fill()
+      let mono = NSFont.monospacedSystemFont(ofSize: 17, weight: .regular)
+      "$ npm run dev".draw(at: NSPoint(x: 20, y: 22), withAttributes: [.font: mono, .foregroundColor: NSColor(white: 0.75, alpha: 1)])
+      "TypeError: Cannot read\nproperties of undefined\n(reading 'map')".draw(
+        in: NSRect(x: 20, y: 66, width: 300, height: 90), withAttributes: [.font: mono, .foregroundColor: NSColor(red: 1, green: 0.42, blue: 0.42, alpha: 1)])
+      "  at TaskList\n  (TaskList.tsx:14)\n  at renderWithHooks".draw(
+        in: NSRect(x: 20, y: 176, width: 300, height: 100), withAttributes: [.font: mono, .foregroundColor: NSColor(white: 0.55, alpha: 1)])
+      return true
+    }
+  }
   @MainActor static func renderPreview(to url: URL) throws {
     NSApp.setActivationPolicy(.accessory)
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(
@@ -321,6 +335,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
     if let value = argument("--palette") { controller.changeCompanion { $0.appearance.palette = value } }
     if CommandLine.arguments.contains("--edit") { controller.hub.editing = true }
+    if let me = controller.account.userID, CommandLine.arguments.contains("--demo-social") {
+      controller.social.loadDemo(me: me, hangingOut: CommandLine.arguments.contains("--hangout"))
+    }
+    if CommandLine.arguments.contains("--demo-chat") {
+      controller.assistant.conversation = [
+        InferenceMessage(role: "user", content: "Give me a 3-step plan to study for my bio test tomorrow"),
+        InferenceMessage(
+          role: "assistant",
+          content: "Pick your 5 shakiest topics, do a 25-minute focus round on each, then quiz yourself out loud. Sleep early!"),
+      ]
+      controller.assistant.status = ""
+    }
     if CommandLine.arguments.contains("--signed-out") { controller.account.previewSignedOut() }
     if let index = CommandLine.arguments.firstIndex(of: "--widgets"), CommandLine.arguments.count > index + 1 {
       // For previews: a comma-separated list of kind:span, such as shortcuts:2,recorder:1,lens:1.
@@ -343,6 +369,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
     let coordinator = IslandCoordinator(controller: controller, preview: true)
     if CommandLine.arguments.contains("--lens-permission") { coordinator.lens.needsPermission = true }
+    if CommandLine.arguments.contains("--demo-lens") {
+      coordinator.lens.loadDemo(
+        image: demoLensImage(),
+        text: "TypeError: Cannot read properties of undefined (reading 'map') at TaskList (TaskList.tsx:14)",
+        labels: ["Screenshot", "Text"],
+        answer: "Your code calls .map on tasks before they've loaded, so tasks is still undefined on the first render. Start it as an empty list: useState([]), or write tasks?.map(...). Line 14 of TaskList.tsx.")
+    }
     if let value = argument("--banner") {
       switch value {
       case "approval": coordinator.preview(banner: .approval(controller.agents.pending.first?.id ?? UUID()))
@@ -371,6 +404,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     window.contentView = view
     view.frame = frame
     view.layoutSubtreeIfNeeded()
+    if CommandLine.arguments.contains("--demo-chat") {
+      // Let Chat finish connecting so the snapshot shows the conversation, not "Connecting…".
+      RunLoop.main.run(until: Date().addingTimeInterval(3))
+      controller.assistant.status = ""
+      controller.assistant.running = false
+      view.layoutSubtreeIfNeeded()
+    }
     guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
       throw MoltError.invalid("Could not allocate preview bitmap.")
     }

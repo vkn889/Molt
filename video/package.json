@@ -6,14 +6,26 @@
   "scripts": {
     "frames": "./make-assets.sh",
     "studio": "remotion studio",
-    "render": "remotion render MoltRelease out/Molt-0.9.0.mp4"
+    "render": "remotion render MoltRelease out/Molt-0.9.0.mp4",
+    "render:ad": "remotion render MoltAd out/Molt-Commercial.mp4 --codec=h264 --crf=16",
+    "render:ad2": "remotion render MoltAdV2 out/Molt-Commercial-v2.mp4 --codec=h264 --crf=16",
+    "screens": "node render-screens.mjs",
+    "render:ad3": "remotion render MoltAdV3 out/Molt-Commercial-v3-raw.mp4 --codec=h264 --crf=16 --gl=angle",
+    "chiptune": "python3 make-chiptune.py public/teaser/chiptune.wav",
+    "render:teaser": "node render-safe.mjs Teaser out/Molt-Teaser-v2.mp4",
+    "render:ad4": "node render-safe.mjs MoltAdV4 out/Molt-Commercial-v4.mp4",
+    "v4": "./make-v4-assets.sh"
   },
   "dependencies": {
+    "@react-three/fiber": "9.1.2",
     "@remotion/cli": "4.0.534",
     "@remotion/google-fonts": "4.0.534",
+    "@remotion/three": "4.0.534",
+    "@types/three": "0.169.0",
     "react": "19.0.0",
     "react-dom": "19.0.0",
-    "remotion": "4.0.534"
+    "remotion": "4.0.534",
+    "three": "0.169.0"
   },
   "devDependencies": {
     "@types/react": "19.0.0",

@@ -91,6 +91,10 @@ import Vision
       relaunch()
     }
   }
+  /// A finished answer about a sample image, for screenshots and videos only.
+  func loadDemo(image: NSImage, text: String, labels: [String], answer: String) {
+    self.image = image; self.text = text; self.labels = labels; self.answer = answer
+  }
   func clear() {
     generation?.cancel()
     error = ""

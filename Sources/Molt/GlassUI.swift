@@ -1,3 +1,4 @@
+import MoltCore
 import AppKit
 import SwiftUI
 
@@ -14,7 +15,7 @@ struct NotchSurface: View {
   var radius: CGFloat = 16
   var body: some View {
     RoundedRectangle(cornerRadius: radius, style: .continuous)
-      .fill(Color.white.opacity(0.06))
+      .fill(Color(red: 0.075, green: 0.075, blue: 0.086))
       .overlay(
         RoundedRectangle(cornerRadius: radius, style: .continuous)
           .strokeBorder(Color.white.opacity(0.07), lineWidth: 0.5))
@@ -131,4 +132,94 @@ struct NotchShape: Shape {
     path.closeSubpath()
     return path
   }
+}
+
+/// How the open notch's header and page arrive: a beat after the shape starts to open, they
+/// come into focus from a slight blur and scale. Leaving is a quick fade, handled by the parent.
+struct Entrance: ViewModifier {
+  var delay: Double
+  var motion: Animation?
+  @State private var shown = false
+  func body(content: Content) -> some View {
+    content
+      .opacity(shown ? 1 : 0)
+      .scaleEffect(shown ? 1 : 0.98, anchor: .top)
+      .blur(radius: shown ? 0 : 6)
+      .offset(y: shown ? 0 : -4)
+      .onAppear {
+        guard let motion, !CommandLine.arguments.contains("--render-preview") else { shown = true; return }
+        withAnimation(motion.delay(delay)) { shown = true }
+      }
+  }
+}
+
+/// Frames of named parts of the notch, in its window, for the tour's spotlight.
+struct AnchorKey: PreferenceKey {
+  static var defaultValue: [String: CGRect] = [:]
+  static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) { value.merge(nextValue()) { $1 } }
+}
+extension View {
+  func anchor(_ name: String) -> some View {
+    background(GeometryReader { proxy in Color.clear.preference(key: AnchorKey.self, value: [name: proxy.frame(in: .global)]) })
+  }
+}
+
+extension Notification.Name {
+  /// Opens the Settings window, at the section in `object` when there is one.
+  static let moltOpenSettings = Notification.Name("moltOpenSettings")
+}
+
+/// The "…" button that subpages show in place of the tools: that page's options, in a menu.
+struct PageMenu: View {
+  var route: String
+  @ObservedObject var controller: PetController
+  @ObservedObject var prefs: NotchPrefs
+  var body: some View {
+    Button(action: show) {
+      Image(systemName: "ellipsis").font(.system(size: 12, weight: .bold)).foregroundStyle(Color.white.opacity(0.6))
+        .frame(width: 28, height: 28).background(Circle().fill(Color.white.opacity(0.08))).contentShape(Circle())
+    }
+    .buttonStyle(.plain).help("More").accessibilityLabel("More")
+  }
+  private var items: [(String, () -> Void)] {
+    let settings: (String?) -> () -> Void = { section in { NotificationCenter.default.post(name: .moltOpenSettings, object: section) } }
+    switch route {
+    case "Focus":
+      var list: [(String, () -> Void)] = [("Reset to 25 minutes", { UserDefaults.standard.set(25, forKey: "focusMinutes") })]
+      if controller.openFocus != nil { list.append(("Stop this session", { controller.changeFocus("stop") })) }
+      return list + [("-", {}), ("Focus settings…", settings("focus"))]
+    case "Health":
+      return [("Open Activity Monitor", { NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Utilities/Activity Monitor.app")) })]
+    case "NotchSettings":
+      return [
+        ("Reset the notch layout", {
+          prefs.tabOrder = NotchLayout.tabs
+          prefs.hiddenTabs = []
+          prefs.priority = LiveKind.allCases
+        }), ("-", {}), ("All settings…", settings("notch")),
+      ]
+    case "AddWidget": return [("Hub settings…", settings("hub"))]
+    default: return [("All settings…", settings(nil))]
+    }
+  }
+  private func show() {
+    let menu = NSMenu()
+    for (title, action) in items {
+      if title == "-" { menu.addItem(.separator()); continue }
+      menu.addItem(ClosureItem(title, action))
+    }
+    menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
+  }
+}
+
+/// A menu item that runs a closure.
+final class ClosureItem: NSMenuItem {
+  private let run: () -> Void
+  init(_ title: String, _ run: @escaping () -> Void) {
+    self.run = run
+    super.init(title: title, action: #selector(fire), keyEquivalent: "")
+    target = self
+  }
+  required init(coder: NSCoder) { fatalError() }
+  @objc private func fire() { run() }
 }

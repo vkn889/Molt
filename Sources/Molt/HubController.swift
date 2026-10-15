@@ -9,6 +9,8 @@ import SwiftUI
     var usageConsent: Bool?
     var widgets: [HubWidget]?
     var note: String?
+    /// Files and links dropped on Molt to keep.
+    var tray: [TrayItem]?
   }
   struct Place: Codable, Identifiable, Equatable {
     var id: Int; var name: String; var latitude: Double; var longitude: Double; var country: String?
@@ -17,7 +19,11 @@ import SwiftUI
     var temperature: Double
     var code: Int
     var updated: Date
-    var symbol: String {
+    /// The next 12 hours.
+    var hours: [Hour] = []
+    struct Hour: Equatable { var date: Date; var temperature: Double; var code: Int; var symbol: String { Weather.symbol(code) } }
+    var symbol: String { Self.symbol(code) }
+    static func symbol(_ code: Int) -> String {
       switch code {
       case 0: return "sun.max.fill"
       case 1...3: return "cloud.sun.fill"
@@ -49,10 +55,28 @@ import SwiftUI
   @Published var weather: Weather?
   @Published var busy = false
   @Published var editing = false
+  /// The widget gallery: what you've typed, the kind you're browsing, and where the new widget goes.
+  @Published var pickerQuery = ""
+  @Published var pickerCategory = "All"
+  var pickerSlot: Int?
+  /// How many rows the Hub can grow to, from one to three.
+  @Published var rows = min(HubLayout.maxRows, max(1, UserDefaults.standard.object(forKey: "hubRows") as? Int ?? HubLayout.defaultRows)) {
+    didSet { UserDefaults.standard.set(rows, forKey: "hubRows") }
+  }
   let media = NowPlayingController()
   let actions = QuickActions()
   let library = MusicLibrary()
   let sessions: SessionsController
+  let clipboard: ClipboardHistory
+  let timers = TimerController()
+  let daily: DailyController
+  let reminders = RemindersController()
+  let devices = DeviceBatteries()
+  let network = NetworkMonitor()
+  let system = SystemGraph()
+  let audio = AudioOutputs()
+  let inUse = MediaInUse()
+  let recent = RecentFiles()
   private let url: URL
   private var storageBlocked = false
   init(directory: URL) {
@@ -63,6 +87,8 @@ import SwiftUI
       do { loaded = try JSONDecoder().decode(Saved.self, from: Data(contentsOf: url)) } catch { failed = true }
     }
     sessions = SessionsController(directory: directory, consent: loaded.usageConsent ?? false)
+    clipboard = ClipboardHistory(directory: directory)
+    daily = DailyController(directory: directory)
     saved = loaded
     if failed { storageBlocked = true; status = "Hub data could not load. Original file preserved." }
     media.spotify = library.spotify
@@ -78,7 +104,7 @@ import SwiftUI
   // MARK: Widgets
 
   var layout: [HubWidget] {
-    HubLayout.sanitize(saved.widgets ?? HubLayout.defaults, known: Set(WidgetKind.catalog.map(\.id)))
+    HubLayout.sanitize(saved.widgets ?? HubLayout.defaults, known: Set(WidgetKind.catalog.map(\.id)), rows: rows)
   }
   func setLayout(_ layout: [HubWidget]?) {
     guard let layout else { return }
@@ -86,13 +112,20 @@ import SwiftUI
     save()
   }
   func add(_ kind: WidgetKind, at index: Int? = nil) {
-    let room = HubLayout.capacity - HubLayout.used(layout)
-    guard let span = kind.spans.first(where: { $0 <= room }) else { return }
-    setLayout(HubLayout.add(HubWidget(kind: kind.id, span: span, items: kind.id == "shortcuts" ? QuickActions.defaults : []), at: index, to: layout))
+    let items = kind.id == "shortcuts" ? ["action:record", "action:lens", "action:dark", "action:focus"] : []
+    // The smallest size that fits where it's going, or anywhere after.
+    for span in kind.spans {
+      if let next = HubLayout.add(HubWidget(kind: kind.id, span: span, items: items), at: index, to: layout, rows: rows)
+        ?? HubLayout.add(HubWidget(kind: kind.id, span: span, items: items), to: layout, rows: rows)
+      {
+        setLayout(next)
+        return
+      }
+    }
   }
   func remove(_ id: UUID) { setLayout(HubLayout.remove(id, from: layout)) }
-  func resize(_ widget: HubWidget) { setLayout(HubLayout.resize(widget.id, to: widget.span == 1 ? 2 : 1, in: layout)) }
-  func move(_ id: UUID, before target: UUID?) { setLayout(HubLayout.move(id, before: target, in: layout)) }
+  func resize(_ widget: HubWidget) { setLayout(HubLayout.resize(widget.id, to: widget.span == 1 ? 2 : 1, in: layout, rows: rows)) }
+  func move(_ id: UUID, before target: UUID?) { setLayout(HubLayout.move(id, before: target, in: layout, rows: rows)) }
   func setItems(_ id: UUID, _ items: [String]) {
     var next = layout
     guard let index = next.firstIndex(where: { $0.id == id }) else { return }
@@ -101,7 +134,25 @@ import SwiftUI
   }
   func canResize(_ widget: HubWidget) -> Bool {
     guard let kind = WidgetKind.find(widget.kind), kind.spans.count > 1 else { return false }
-    return widget.span == 2 || HubLayout.used(layout) < HubLayout.capacity
+    return HubLayout.resize(widget.id, to: widget.span == 1 ? 2 : 1, in: layout, rows: rows) != nil
+  }
+
+  // MARK: Tray
+
+  var tray: [TrayItem] { saved.tray ?? [] }
+  func keep(_ urls: [URL]) {
+    let items = urls.map { $0.isFileURL ? TrayItem(kind: .file, value: $0.path) : TrayItem(kind: .link, value: $0.absoluteString) }
+    saved.tray = Tray.adding(items, to: tray)
+    save()
+  }
+  func removeFromTray(_ id: UUID) {
+    saved.tray = tray.filter { $0.id != id }
+    save()
+  }
+  /// Files that were moved or deleted since they were kept drop out of the tray.
+  func pruneTray() {
+    let kept = tray.filter { $0.kind == .link || FileManager.default.fileExists(atPath: $0.value) }
+    if kept.count != tray.count { saved.tray = kept; save() }
   }
 
   // MARK: Volume
@@ -154,11 +205,22 @@ import SwiftUI
     Task {
       defer { busy = false }
       do {
-        let url = URL(string: "https://api.open-meteo.com/v1/forecast?latitude=\(place.latitude)&longitude=\(place.longitude)&current=temperature_2m,weather_code&timezone=auto")!
+        let url = URL(string: "https://api.open-meteo.com/v1/forecast?latitude=\(place.latitude)&longitude=\(place.longitude)&current=temperature_2m,weather_code&hourly=temperature_2m,weather_code&forecast_hours=13&timezone=auto&timeformat=unixtime")!
         let data = try await fetch(url)
-        struct Response: Decodable { struct Current: Decodable { var temperature_2m: Double; var weather_code: Int }; var current: Current }
-        let value = try JSONDecoder().decode(Response.self, from: data).current
-        weather = Weather(temperature: value.temperature_2m, code: value.weather_code, updated: Date())
+        struct Response: Decodable {
+          struct Current: Decodable { var temperature_2m: Double; var weather_code: Int }
+          struct Hourly: Decodable { var time: [Double]; var temperature_2m: [Double]; var weather_code: [Int] }
+          var current: Current
+          var hourly: Hourly?
+        }
+        let response = try JSONDecoder().decode(Response.self, from: data)
+        let value = response.current
+        let hourly = response.hourly
+        let hours = hourly.map { h in
+          zip(h.time, zip(h.temperature_2m, h.weather_code)).map { Weather.Hour(date: Date(timeIntervalSince1970: $0), temperature: $1.0, code: $1.1) }
+            .filter { $0.date > Date().addingTimeInterval(-3600) }.prefix(12)
+        } ?? []
+        weather = Weather(temperature: value.temperature_2m, code: value.weather_code, updated: Date(), hours: Array(hours))
         status = ""
       } catch { status = "Weather unavailable." }
     }

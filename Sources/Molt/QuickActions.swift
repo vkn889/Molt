@@ -1,4 +1,6 @@
 import AppKit
+import CoreBluetooth
+import CoreWLAN
 import SwiftUI
 
 /// One-click actions for Shortcuts widgets. Items are stored as "action:<id>", "app:<path>",
@@ -18,7 +20,15 @@ import SwiftUI
     Action(id: "trash", title: "Empty Trash", symbol: "trash.fill", tint: .gray),
     Action(id: "focus", title: "Focus 25m", symbol: "timer", tint: .green),
     Action(id: "settings", title: "System Settings", symbol: "gearshape.fill", tint: .gray),
+    Action(id: "desktop", title: "Hide desktop icons", symbol: "menubar.dock.rectangle", tint: .white),
+    Action(id: "wifi", title: "Wi-Fi", symbol: "wifi", tint: .blue),
+    Action(id: "bluetooth", title: "Bluetooth", symbol: "dot.radiowaves.left.and.right", tint: .blue),
+    Action(id: "dnd", title: "Do Not Disturb", symbol: "moon.fill", tint: .indigo),
   ]
+  /// Colors you've picked, newest first, as hex.
+  @Published private(set) var colors: [String] = UserDefaults.standard.stringArray(forKey: "colorHistory") ?? []
+  /// What each toggle is set to, refreshed when the Quick toggles widget shows.
+  @Published private(set) var toggles: [String: Bool] = [:]
   static let defaults = ["action:record", "action:screenshot", "action:color", "action:awake"]
 
   @Published private(set) var recording: Date?
@@ -61,6 +71,36 @@ import SwiftUI
   }
   func isActive(_ item: String) -> Bool {
     item == "action:record" && recording != nil || item == "action:awake" && awake
+      || toggles[Self.split(item).1] == true
+  }
+  /// Reads the state of the system toggles: dark mode, desktop icons, Wi-Fi and Bluetooth.
+  func refreshToggles() {
+    Task.detached(priority: .utility) {
+      let dark = UserDefaults.standard.string(forKey: "AppleInterfaceStyle") == "Dark"
+      let desktop = (await Self.output("/usr/bin/defaults", ["read", "com.apple.finder", "CreateDesktop"])).trimmingCharacters(in: .whitespacesAndNewlines)
+      let wifi = CWWiFiClient.shared().interface()?.powerOn() ?? false
+      // Reading Bluetooth counts as using it, so only once you've allowed it (tapping the toggle asks).
+      let bluetooth = Bluetooth.allowed ? Bluetooth.power() ?? false : false
+      await MainActor.run {
+        self.toggles = ["dark": dark, "desktop": desktop == "0" || desktop == "false", "wifi": wifi, "bluetooth": bluetooth, "awake": self.awake]
+      }
+    }
+  }
+  func copyColor(_ hex: String, as format: String = "hex") {
+    let value: String
+    let rgb = Self.rgb(hex)
+    switch format {
+    case "rgb": value = "rgb(\(rgb.0), \(rgb.1), \(rgb.2))"
+    case "swiftui": value = String(format: "Color(red: %.3f, green: %.3f, blue: %.3f)", Double(rgb.0) / 255, Double(rgb.1) / 255, Double(rgb.2) / 255)
+    default: value = hex
+    }
+    NSPasteboard.general.clearContents()
+    NSPasteboard.general.setString(value, forType: .string)
+    status = "Copied \(value)"
+  }
+  static func rgb(_ hex: String) -> (Int, Int, Int) {
+    let value = Int(hex.dropFirst(), radix: 16) ?? 0
+    return ((value >> 16) & 255, (value >> 8) & 255, value & 255)
   }
   static func split(_ item: String) -> (String, String) {
     guard let colon = item.firstIndex(of: ":") else { return ("", item) }
@@ -101,6 +141,28 @@ import SwiftUI
     case "trash": confirmingTrash = true
     case "focus": onFocus()
     case "settings": NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/System Settings.app"))
+    case "desktop":
+      Task {
+        let hidden = toggles["desktop"] == true
+        launch("/usr/bin/defaults", ["write", "com.apple.finder", "CreateDesktop", "-bool", hidden ? "true" : "false"])
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        launch("/usr/bin/killall", ["Finder"])
+        toggles["desktop"] = !hidden
+      }
+    case "wifi":
+      if let wifi = CWWiFiClient.shared().interface() {
+        do { try wifi.setPower(!wifi.powerOn()); toggles["wifi"] = wifi.powerOn() } catch { status = "macOS didn't let Molt change Wi-Fi." }
+      }
+    case "bluetooth":
+      guard Bluetooth.allowed || Bluetooth.askable else { status = "Bluetooth can't be switched from here."; break }
+      if let on = Bluetooth.power() { Bluetooth.setPower(!on); toggles["bluetooth"] = !on } else { status = "Bluetooth can't be switched from here." }
+    case "dnd":
+      // macOS has no public switch for Focus; a Shortcut you make can do it.
+      Task {
+        await loadShortcutsNow()
+        if let name = shortcuts.first(where: { $0.localizedCaseInsensitiveContains("do not disturb") }) { runShortcut(name) }
+        else { status = "Make a Shortcut with “Do Not Disturb” in its name that sets Focus, and Molt will run it." }
+      }
     default: break
     }
   }
@@ -169,7 +231,12 @@ import SwiftUI
       let hex = String(format: "#%02X%02X%02X", Int(color.redComponent * 255), Int(color.greenComponent * 255), Int(color.blueComponent * 255))
       NSPasteboard.general.clearContents()
       NSPasteboard.general.setString(hex, forType: .string)
-      Task { @MainActor in self?.status = "Copied \(hex)" }
+      Task { @MainActor in
+        guard let self else { return }
+        self.status = "Copied \(hex)"
+        self.colors = Array(([hex] + self.colors.filter { $0 != hex }).prefix(12))
+        UserDefaults.standard.set(self.colors, forKey: "colorHistory")
+      }
     }
   }
   /// Keeps the Mac and display awake until turned off or Molt quits.
@@ -194,6 +261,9 @@ import SwiftUI
       let output = await Self.output("/usr/bin/shortcuts", ["list"])
       shortcuts = output.split(separator: "\n").map(String.init).filter { !$0.isEmpty }.sorted()
     }
+  }
+  private func loadShortcutsNow() async {
+    if shortcuts.isEmpty { shortcuts = await Self.output("/usr/bin/shortcuts", ["list"]).split(separator: "\n").map(String.init) }
   }
   private func runShortcut(_ name: String) {
     Task {
@@ -232,5 +302,31 @@ import SwiftUI
       process.waitUntilExit()
       return String(decoding: data, as: UTF8.self)
     }.value
+  }
+}
+
+/// Bluetooth on and off, through IOBluetooth's preference functions (looked up at run time, so
+/// Molt still runs where they're missing). macOS asks for Bluetooth permission the first time.
+enum Bluetooth {
+  /// Whether you've already allowed Bluetooth, checked without asking.
+  static var allowed: Bool { CBManager.authorization == .allowedAlways }
+  /// Outside an app bundle there's no Info.plist to ask with, and macOS would stop Molt.
+  static var askable: Bool { Bundle.main.bundleURL.pathExtension == "app" && Bundle.main.object(forInfoDictionaryKey: "NSBluetoothAlwaysUsageDescription") != nil }
+  private typealias Get = @convention(c) () -> Int32
+  private typealias Set = @convention(c) (Int32) -> Void
+  private static let handle = dlopen("/System/Library/Frameworks/IOBluetooth.framework/IOBluetooth", RTLD_LAZY)
+  private static var asker: CBCentralManager?
+  /// Shows macOS's Bluetooth permission prompt, when Molt can.
+  static func request() {
+    guard askable, CBManager.authorization == .notDetermined, asker == nil else { return }
+    asker = CBCentralManager(delegate: nil, queue: nil, options: [CBCentralManagerOptionShowPowerAlertKey: false])
+  }
+  static func power() -> Bool? {
+    guard let symbol = dlsym(handle, "IOBluetoothPreferenceGetControllerPowerState") else { return nil }
+    return unsafeBitCast(symbol, to: Get.self)() != 0
+  }
+  static func setPower(_ on: Bool) {
+    guard let symbol = dlsym(handle, "IOBluetoothPreferenceSetControllerPowerState") else { return }
+    unsafeBitCast(symbol, to: Set.self)(on ? 1 : 0)
   }
 }

@@ -8,7 +8,11 @@ final class FloatingPanel: NSPanel { override var canBecomeKey: Bool { true } }
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   private var controller: PetController?
   private var island: IslandCoordinator?
+  private var tour: Onboarding?
   private var status: NSStatusItem?
+  /// Left-click opens the popup; right-click or Control-click, the classic menu.
+  private let popover = NSPopover()
+  private var menu = NSMenu()
   private var lockDescriptor: Int32 = -1
   func applicationDidFinishLaunching(_ notification: Notification) {
     NSApp.setActivationPolicy(.accessory)
@@ -23,14 +27,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSApp.terminate(nil)
         return
       }
+      // A new install has no pet yet; an update or a relaunch already has one.
+      let existing = FileManager.default.fileExists(atPath: root.appendingPathComponent("pet-state.json").path)
       let controller = try PetController()
       self.controller = controller
       status = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
       status?.button?.image = MoltIcon.menuBarImage()
+      status?.button?.target = self
+      status?.button?.action = #selector(statusClicked)
+      status?.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
+      popover.behavior = .transient
+      popover.animates = true
+      let host = NSHostingController(rootView: MenuBarPopup(controller: controller) { [weak self] action in self?.popupAction(action) })
+      host.sizingOptions = .preferredContentSize
+      popover.contentViewController = host
       controller.onChange = { [weak self] in self?.rebuildMenu() }
       controller.onGame = { [weak self] in self?.show("Play") }
-      island = IslandCoordinator(controller: controller)
+      let island = IslandCoordinator(controller: controller)
+      self.island = island
       rebuildMenu()
+      SettingsWindow.shared.controller = controller
+      SettingsWindow.shared.coordinator = island
+      SettingsWindow.shared.replayTour = { [weak self] in self?.replayTour() }
+      NotificationCenter.default.addObserver(forName: .moltOpenSettings, object: nil, queue: .main) { note in
+        let section = note.object as? String
+        Task { @MainActor in SettingsWindow.shared.show(section) }
+      }
+      let tour = Onboarding(controller: controller, coordinator: island)
+      tour.menuBarFrame = { [weak self] in self?.status?.button?.window?.frame }
+      self.tour = tour
+      // Molt wakes up when you open it after quitting, and on its very first launch. It doesn't
+      // when it never quit, such as after a crash or when the Mac restarts it on login.
+      let defaults = UserDefaults.standard
+      let firstRun = !existing && !defaults.bool(forKey: "moltTourDone")
+      // Updating means quitting the old version, so a new version's first launch counts too.
+      let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
+      let updated = defaults.string(forKey: "moltLastVersion") != version
+      let afterQuit = defaults.bool(forKey: "moltQuitByUser") || updated
+      defaults.set(false, forKey: "moltQuitByUser")
+      defaults.set(version, forKey: "moltLastVersion")
+      // What's new is marked for two weeks after each update.
+      if updated { defaults.set(Date(), forKey: "moltNewSince") }
+      if firstRun {
+        island.boot { tour.start() }
+      } else if afterQuit && island.prefs.wakeAnimation {
+        island.boot()
+      }
     } catch { showRecovery(error) }
   }
   private func showRecovery(_ error: Error) {
@@ -65,14 +107,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     add("Open Molt", #selector(openHome), to: menu, key: "o")
     add("Ask about screen", #selector(openLens), to: menu, key: "l")
     add("Play with \(controller.petName)", #selector(openPlay), to: menu)
-    add("Settings…", #selector(openSettings), to: menu, key: ",")
+    add("Settings…", #selector(openSettingsWindow), to: menu, key: ",")
     menu.addItem(.separator())
     add(
       controller.organization.consent.paused ? "Resume app tracking" : "Pause app tracking",
       #selector(toggleTracking), to: menu)
     if controller.error != nil { add("Save needs attention…", #selector(openHome), to: menu) }
     add("Quit Molt", #selector(quit), to: menu, key: "q")
-    status?.menu = menu
+    self.menu = menu
+  }
+  @objc private func statusClicked() {
+    guard let button = status?.button else { return }
+    let event = NSApp.currentEvent
+    if event?.type == .rightMouseUp || event?.modifierFlags.contains(.control) == true {
+      popover.performClose(nil)
+      rebuildMenu()
+      status?.menu = menu
+      button.performClick(nil)
+      status?.menu = nil
+    } else if popover.isShown {
+      popover.performClose(nil)
+    } else {
+      NSApp.activate(ignoringOtherApps: true)
+      popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+      popover.contentViewController?.view.window?.makeKey()
+    }
+  }
+  private func popupAction(_ action: String) {
+    popover.performClose(nil)
+    switch action {
+    case "home": openHome()
+    case "lens": openLens()
+    case "play": openPlay()
+    case "tracking": toggleTracking()
+    case "settings": SettingsWindow.shared.show()
+    case "agents": UserDefaults.standard.set("Live", forKey: "agentsTab"); show("Agents")
+    case "quit": quit()
+    default: break
+    }
   }
   private func add(_ title: String, _ selector: Selector, to menu: NSMenu, key: String = "") {
     let item = NSMenuItem(title: title, action: selector, keyEquivalent: key)
@@ -88,13 +160,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   @objc private func stopRecording() { controller?.hub.actions.stopRecording() }
   @objc private func openPlay() { show("Play") }
   @objc private func openSettings() { show("Settings") }
+  @objc private func openSettingsWindow() { SettingsWindow.shared.show() }
   @objc private func toggleTracking() {
     controller?.updateOrganization { $0.consent.paused.toggle() }
     controller?.configureContext()
     rebuildMenu()
   }
-  @objc private func quit() { NSApp.terminate(nil) }
+  @objc private func quit() {
+    UserDefaults.standard.set(true, forKey: "moltQuitByUser")
+    NSApp.terminate(nil)
+  }
+  /// From Settings: show the tour again.
+  func replayTour() { island?.boot { [weak self] in self?.tour?.start() } }
   func applicationWillTerminate(_ notification: Notification) {
+    if let clipboard = controller?.hub.clipboard, clipboard.clearOnQuit { clipboard.clear() }
     controller?.changeFocus("pause")
     controller?.tick()
     controller?.saveOrganization()
@@ -323,7 +402,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     for (flag, tab) in [
       ("--hub", "Hub"), ("--play", "Play"), ("--sessions", "Sessions"), ("--chat", "Ask Molt"), ("--settings", "Settings"),
       ("--molting", "Molting"), ("--lens", "Lens"), ("--health", "Health"), ("--agents", "Agents"), ("--wardrobe", "Wardrobe"),
+      ("--focus", "Focus"), ("--drop", "Drop"), ("--notch-settings", "NotchSettings"), ("--add-widget", "AddWidget"),
     ] where CommandLine.arguments.contains(flag) { controller.tab = tab }
+    if let value = argument("--focus-left").flatMap(Double.init) {
+      // A session that started a while ago, with this many minutes left.
+      controller.focus(minutes: 25)
+      controller.updateOrganization { o in
+        if let index = o.sessions.lastIndex(where: { $0.finished == nil }) { o.sessions[index].lastResumed = Date().addingTimeInterval(-(25 - value) * 60) }
+      }
+    }
+    if let value = argument("--tray") {
+      let folder = root.appendingPathComponent("Tray")
+      try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+      controller.hub.keep(value.split(separator: ",").map { name in
+        name.hasPrefix("https") ? URL(string: String(name))! : {
+          let url = folder.appendingPathComponent(String(name))
+          FileManager.default.createFile(atPath: url.path, contents: Data())
+          return url
+        }()
+      })
+    }
     if let value = argument("--agents-tab") { UserDefaults.standard.set(value, forKey: "agentsTab") }
     if CommandLine.arguments.contains("--demo") {
       controller.agents.loadDemo(approval: CommandLine.arguments.contains("--approval"), request: argument("--request") ?? "command")
@@ -367,7 +465,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       repeat { RunLoop.main.run(until: Date().addingTimeInterval(0.2)) } while controller.hub.sessions.busy && Date() < deadline
       RunLoop.main.run(until: Date().addingTimeInterval(0.5))
     }
+    if let value = argument("--battery").flatMap(Double.init) {
+      controller.health.values["batteryLevel"] = value
+      controller.health.values["isCharging"] = 0
+    }
     let coordinator = IslandCoordinator(controller: controller, preview: true)
+    if let value = argument("--jump") { coordinator.jump = value }
+    if let value = argument("--live") {
+      coordinator.preview(live: value.split(separator: ",").compactMap { LiveKind(rawValue: String($0)) })
+    }
     if CommandLine.arguments.contains("--lens-permission") { coordinator.lens.needsPermission = true }
     if CommandLine.arguments.contains("--demo-lens") {
       coordinator.lens.loadDemo(
@@ -386,6 +492,60 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       }
     } else if CommandLine.arguments.contains("--approval") {
       coordinator.preview(banner: .approval(controller.agents.pending.first?.id ?? UUID()), expanded: true)
+    }
+    if let value = argument("--boot-at").flatMap(Double.init) { coordinator.preview(bootAt: value) }
+    if let section = argument("--settings-window") {
+      let model = SettingsModel()
+      model.section = SettingsSection(rawValue: section) ?? .general
+      let host = NSHostingView(rootView: SettingsRoot(model: model, controller: controller, coordinator: coordinator, prefs: coordinator.prefs, hub: controller.hub, replayTour: {})
+        .frame(width: 820, height: 620).environment(\.colorScheme, .dark).background(Color(nsColor: .windowBackgroundColor)))
+      host.frame = NSRect(x: 0, y: 0, width: 820, height: 620)
+      let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+      window.appearance = NSAppearance(named: .darkAqua)
+      window.contentView = host
+      host.layoutSubtreeIfNeeded()
+      RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+      guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { throw MoltError.invalid("No bitmap.") }
+      host.cacheDisplay(in: host.bounds, to: rep)
+      try rep.representation(using: .png, properties: [:])?.write(to: url, options: .atomic)
+      print("Rendered \(url.path)")
+      return
+    }
+    if let step = argument("--tour-step").flatMap(Int.init) {
+      // The tour over a plain desktop, with the open notch at the top.
+      let tour = Onboarding(controller: controller, coordinator: coordinator)
+      let size = coordinator.expandedSize
+      let screen = CGSize(width: 1512, height: 982)
+      let hole = CGRect(x: (screen.width - size.width) / 2 - 22, y: -6, width: size.width + 44, height: size.height + 12)
+      tour.preview(step: step, hole: hole, molt: CGPoint(x: hole.midX - 200, y: hole.maxY + 70))
+      let host = NSHostingView(rootView: ZStack(alignment: .top) {
+        LinearGradient(colors: [Color(red: 0.35, green: 0.47, blue: 0.68), Color(red: 0.62, green: 0.55, blue: 0.5)], startPoint: .top, endPoint: .bottom)
+        IslandView(controller: controller, coordinator: coordinator)
+        OnboardingOverlay(tour: tour, controller: controller, prefs: coordinator.prefs)
+      }.frame(width: screen.width, height: screen.height))
+      host.frame = NSRect(origin: .zero, size: screen)
+      let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+      window.contentView = host
+      host.layoutSubtreeIfNeeded()
+      guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { throw MoltError.invalid("No bitmap.") }
+      host.cacheDisplay(in: host.bounds, to: rep)
+      try rep.representation(using: .png, properties: [:])?.write(to: url, options: .atomic)
+      print("Rendered \(url.path)")
+      return
+    }
+    if CommandLine.arguments.contains("--popup") {
+      let popup = NSHostingView(rootView: MenuBarPopup(controller: controller) { _ in }
+        .background(RoundedRectangle(cornerRadius: 14).fill(Color(white: 0.16)))
+        .padding(20).background(Color(red: 0.62, green: 0.45, blue: 0.5)))
+      popup.frame = NSRect(origin: .zero, size: popup.fittingSize)
+      let window = NSWindow(contentRect: popup.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+      window.contentView = popup
+      popup.layoutSubtreeIfNeeded()
+      guard let rep = popup.bitmapImageRepForCachingDisplay(in: popup.bounds) else { throw MoltError.invalid("No bitmap.") }
+      popup.cacheDisplay(in: popup.bounds, to: rep)
+      try rep.representation(using: .png, properties: [:])?.write(to: url, options: .atomic)
+      print("Rendered \(url.path)")
+      return
     }
     let rootView =
       AnyView(

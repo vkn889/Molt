@@ -8,6 +8,7 @@ extension PetController {
   /// nearly used up tires it out.
   var displayMood: String {
     if agents.needsYou { return "alert" }
+    if lowBattery { return "tired" }
     if isResting { return "sleeping" }
     if let mood = agents.mood { return mood }
     if github.summary?.ci == .failing { return "worried" }
@@ -295,6 +296,15 @@ struct IslandBannerView: View {
           Text(text).font(.system(size: 12, weight: .medium)).lineLimit(1)
           Spacer(minLength: 6)
           Button("Show") { open("GitHub"); dismiss() }.buttonStyle(PillButtonStyle(tint: .white.opacity(0.14)))
+          Button("OK", action: dismiss).buttonStyle(PillButtonStyle(tint: .white.opacity(0.14)))
+        }
+      case .notice(let text, let symbol):
+        HStack(spacing: 10) {
+          // Molt joins in: drinking for water, cheering a stretch, sleepy on low battery.
+          let mood = symbol == "drop.fill" ? "drinking" : symbol == "figure.walk" ? "happy" : symbol.hasPrefix("battery") ? "tired" : "alert"
+          CreatureView(appearance: appearance, mood: mood, followsPointer: false).frame(width: 30, height: 28)
+          Text(text).font(.system(size: 12, weight: .medium)).lineLimit(2)
+          Spacer(minLength: 6)
           Button("OK", action: dismiss).buttonStyle(PillButtonStyle(tint: .white.opacity(0.14)))
         }
       case .habit(let signature):

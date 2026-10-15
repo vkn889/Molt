@@ -199,6 +199,14 @@ enum BackgroundApp {
       playing: row["is_playing"] as? Bool ?? false,
       artwork: (images.first?["url"] as? String).flatMap(URL.init(string:)))
   }
+  /// The next few songs in your Spotify queue.
+  func upNext() async -> [NowPlayingController.QueueItem] {
+    guard connected, let row = try? await json("GET", "/v1/me/player/queue") else { return [] }
+    return (row["queue"] as? [[String: Any]] ?? []).prefix(3).map { item in
+      let artists = (item["artists"] as? [[String: Any]] ?? []).compactMap { $0["name"] as? String }
+      return NowPlayingController.QueueItem(title: item["name"] as? String ?? "", artist: artists.joined(separator: ", "))
+    }.filter { !$0.title.isEmpty }
+  }
   func control(_ command: String, seconds: Double = 0) {
     Task {
       switch command {

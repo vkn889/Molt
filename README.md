@@ -12,7 +12,11 @@ Molt is drawn pixel by pixel, and it moves like it's alive: it breathes, squashe
 
 Open Molt and create your account once: email, password and a @username. You stay signed in on that Mac. Turn on two-factor authentication in Settings; until you do, Molt sends a gentle weekly reminder.
 
-Hover over the notch, or press **⌘⇧↩**, to open Molt. **⌘⇧L** asks about anything on your screen. Every page is the same size. Home, Hub, Play and Molting sit left of the notch; Lens, Agents, Chat and Settings are icons on the right.
+Hover over the notch, or press **⌘⇧↩**, to open Molt. **⌘⇧L** asks about anything on your screen. Each page sizes the notch to what's on it. Home, Hub, Play and Molting sit left of the notch; Lens, Agents, Chat and Settings are icons on the right. Pages one level down, like Focus, show a back arrow instead.
+
+**Type to jump:** with the notch open, just start typing to find any page, widget, action or setting. Arrows move, Return opens, Escape goes back, and holding Option shows each one's shortcut. "focus 50" starts a 50-minute session.
+
+**The menu bar icon** opens a small popup: Molt and its mood, what's going on right now (agents, a recording, focus, music), and Open, Ask about screen, Play and Pause tracking. Right-click it for the classic menu.
 
 | Shortcut | Opens |
 | --- | --- |
@@ -26,27 +30,33 @@ With VoiceOver on, the Control-Option shortcuts add Command (⌃⌥⌘), since C
 
 ## Pages
 
-- **Home:** now playing, a five-day calendar strip with today's events or tasks, and Mac health. Click the health column to see what's using your Mac. Molt scurries along the bottom, or sleeps.
-- **Hub:** four slots of widgets you choose, like a Home Screen. See [Widgets](#widgets).
+- **Home:** now playing, a five-day calendar strip with today's events or tasks, and Mac health. An event starting within the hour gets a countdown card with **Join** for calls. Click the health column to see what's using your Mac. Molt scurries along the bottom, dances while music plays, or sleeps.
+- **Focus:** drag the pixel ruler (5 to 90 minutes) or pick 15, 25 or 50, and Molt puts on its glasses and works with you. Finished sessions give Molt energy. While the notch is closed, the time left sits beside it.
+- **Hub:** up to two rows of four slots of widgets you choose, like a Home Screen. See [Widgets](#widgets).
+- **Drop on Molt:** drag files or links up to the notch and drop them on **Ask** (chat about them), **Keep** (the Tray widget holds them for later) or **Share** (AirDrop, Mail, Messages).
 - **Play:** a tamagotchi. Drag a meal, snack, water, ball, nap, brush, pat or story onto Molt, or click it. The more you care for Molt, the livelier it gets. **Wardrobe** dresses Molt up; see [Wardrobe](#wardrobe).
 - **Molting:** friends, hangouts and lending your setup. See [Molting](#molting).
 - **Lens:** select part of your screen and ask about it.
 - **Agents:** what Claude Code, Codex and other agents are doing, approvals, your chats with them, plan limits and GitHub. See [Agents](#agents).
 - **Chat:** talk to Molt with Ollama or LM Studio on this Mac, or with Anthropic, OpenAI, Google or OpenRouter using your own key.
-- **Settings:** your account and 2FA, Molt's name and color, accent, hover, display, and every connection.
+- **Settings:** your account and 2FA, Molt's name and color, accent, display, and every connection. **Notch layout** arranges the tabs (drag to reorder, switch off the ones you don't use), sets what the closed notch shows first (agent requests, recording, focus, music, low battery), how long hovering waits before opening, and turns Fit to content, Molt reacting to the Mac, and Type to jump on or off.
+
+With the notch closed, the most important thing going on shows beside it. When several are going at once, swipe sideways on the notch to move between them. On low battery Molt gets sleepy and shows the charge left.
 
 ![Hub](docs/screenshots/notch-hub.png)
 
 ## Widgets
 
-Click the pencil in the header, or hold any widget, to edit the Hub. Widgets jiggle; drag to reorder, **–** removes, the arrows switch between small and wide, and **+** adds from the catalog.
+Click the pencil in the header, or hold any widget, to edit the Hub. Widgets jiggle; drag to reorder, **–** removes, the arrows switch between small and wide, and **+** adds from the catalog, which you can search or browse by kind (with what's new marked). Fill the first row and a second one opens up; the notch grows to fit.
 
 | Widget | Sizes | What it does |
 | --- | --- | --- |
 | Shortcuts | small, wide | 4 or 8 one-click actions you pick: record screen, screenshot, ask about screen, pick a color, keep awake, dark mode, mute, sleep screen, Downloads, empty Trash, focus, System Settings, any app, any Apple Shortcut, or any link |
 | Screen recorder | small | Records the screen with one click; saves to Movies. While recording, a red dot and timer sit beside the notch; click them to stop |
 | Lens | small | Ask about your screen |
-| Focus, Tasks, Weather | small (Tasks also wide) | Focus timer, today's to-dos, your city's weather |
+| Focus | small | Time left as a ring, with Molt in its glasses; click for the Focus page |
+| Tray | small, wide | Files and links you dropped on Molt: click to open, drag out to use |
+| Tasks, Weather | small (Tasks also wide) | Today's to-dos, your city's weather |
 | Top apps | small, wide | Your most-used apps today, with their icons |
 | Molt | small | Molt's needs at a glance |
 | Agent usage | small | Today's Claude Code and Codex tokens |
@@ -54,7 +64,7 @@ Click the pencil in the header, or hold any widget, to edit the Hub. Widgets jig
 | Plan usage | small, wide | Claude and Codex 5-hour and weekly limits, with a forecast |
 | GitHub | small, wide | Your streak, PRs, reviews waiting and default-branch checks |
 | Your week | wide | Agent tokens, tasks done and your streak, in a card you can share |
-| Up next | small, wide | Your next events with a countdown |
+| Next up | small, wide | Your next event with a countdown and Join for calls; wide shows the next three |
 | Mac health | small | Opens the health drill-down |
 | Now playing, Playlists | small/wide, wide | Music controls and playlist covers |
 | Clock, Downloads, Quick note, Web search | various | Time, latest downloads, a scratchpad, and search across Google, YouTube, Wikipedia and Maps |

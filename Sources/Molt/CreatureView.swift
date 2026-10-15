@@ -65,6 +65,8 @@ struct CreatureView: View {
   var followsPointer = true
   /// A fixed time for rendering frames offline, such as for videos.
   var clock: Double? = nil
+  /// Where the eyes look, overriding the pointer: x and y from -1 to 1.
+  var gaze: (Int, Int)? = nil
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @Environment(\.moltReducedMotion) private var moltReduced
   @State private var anchor = WindowAnchor()
@@ -76,7 +78,7 @@ struct CreatureView: View {
         let t = clock ?? (still ? 0 : context.date.timeIntervalSinceReferenceDate)
         let poke = clock.map { _ in poked.map { $0.timeIntervalSinceReferenceDate } }.flatMap { $0 }.map { t - $0 }
           ?? poked.map { context.date.timeIntervalSince($0) }.flatMap { $0 >= 0 && $0 < 1.4 ? $0 : nil }
-        let state = frameState(t: t, poke: poke, look: still ? (0, 0) : look(proxy.frame(in: .global), t: t))
+        let state = frameState(t: t, poke: poke, look: gaze ?? (still ? (0, 0) : look(proxy.frame(in: .global), t: t)))
         Canvas { canvas, size in draw(state, in: &canvas, size: size) }
           .scaleEffect(x: facingLeft ? -1 : 1, y: 1)
           .frame(width: proxy.size.width, height: proxy.size.height)
@@ -159,6 +161,15 @@ struct CreatureView: View {
     case .sleep: sy = 1 + 0.05 * CGFloat(sin(t * 1.6)); sx = 1 - 0.025 * CGFloat(sin(t * 1.6))
     case .work: lift = -CGFloat(max(0, sin(t * 9))) * 0.15
     }
+    if mood == "dancing" {
+      // A bob on every beat at about 116 BPM, swaying from side to side every two.
+      let beat = t * 116 / 60
+      let h = CGFloat(abs(sin(beat * .pi)))
+      lift = -h * 1.3
+      sy = 1 + 0.05 * h
+      sx = 1 - 0.03 * h
+      sway = CGFloat(sin(beat * .pi / 2)) * 0.5
+    }
     if let poke, poke < 0.75 {
       let e = poke / 0.75
       let wave = CGFloat(sin(e * .pi * 3) * (1 - e))
@@ -179,6 +190,7 @@ struct CreatureView: View {
 
   /// Where the eyes point: toward the pointer when it's close, otherwise a glance around now and then.
   private func look(_ frame: CGRect, t: Double) -> (Int, Int) {
+    if let gaze { return gaze }
     if [.sleep, .tired, .celebrate, .love, .happy].contains(pose) { return (0, 0) }
     if pose == .work { return (0, 1) }
     if followsPointer, let window = anchor.window {

@@ -10,6 +10,7 @@ import { HeroMac } from "./HeroMac";
 import { GRID, GRID_CHANGES, GRID_STEPS, HERO_A, HERO_A_SCREENS, HERO_B, HERO_B_SCREENS, V4_DURATION } from "./V4Timing";
 import { MacGrid, STEPS_128 } from "./MacGrid";
 import { H, W } from "./MoltAd";
+import { Mockup092 } from "./Mockups092";
 
 export const Root = () => (
   <>
@@ -42,5 +43,7 @@ export const Root = () => (
     <Composition id="HeroScreenLaptop" component={HeroScreen} durationInFrames={1} fps={30} width={1760} height={1104} defaultProps={{ screen: "wedit" }} />
     {/* The screens of the 3D Macs; `render-screens.mjs` renders each design as a still. */}
     <Composition id="MacScreen" component={ScreenStill} durationInFrames={1} fps={30} width={W} height={H} defaultProps={{ index: 0 }} />
+    {/* Mockups of 0.9.2; `render-mockups.mjs` renders each one as a still at 2x. */}
+    <Composition id="Mockup092" component={Mockup092} durationInFrames={1} fps={30} width={W} height={H} defaultProps={{ id: "01-home" }} />
   </>
 );

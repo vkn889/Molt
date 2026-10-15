@@ -590,5 +590,7 @@ enum IslandBanner: Equatable {
   case finished(AgentController.Finished)
   case message(String, symbol: String)
   case habit(String)
+  /// A short note from Molt, such as a low battery.
+  case notice(String, symbol: String)
   var isApproval: Bool { if case .approval = self { return true } else { return false } }
 }

@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-VERSION="${1:-0.9.1}"
+VERSION="${1:-0.9.2}"
 if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$ ]]; then
   echo 'Expected a version such as 0.8.0' >&2
   exit 1
@@ -41,6 +41,10 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <key>NSHighResolutionCapable</key><true/>
 <key>NSCalendarsUsageDescription</key><string>Molt reads only the calendars you choose to show upcoming commitments. It never edits events.</string>
 <key>NSCalendarsFullAccessUsageDescription</key><string>Molt reads only selected calendars for your Today dashboard. It never creates or edits events.</string>
+<key>NSRemindersUsageDescription</key><string>Molt shows your Reminders in the notch and ticks them off when you do.</string>
+<key>NSRemindersFullAccessUsageDescription</key><string>Molt shows your Reminders in the notch, adds the ones you type, and ticks them off when you do.</string>
+<key>NSBluetoothAlwaysUsageDescription</key><string>The Quick toggles widget turns Bluetooth on and off when you ask. Molt doesn't connect to or scan for devices.</string>
+<key>NSCameraUsageDescription</key><string>The Camera mirror widget shows you to yourself before a call. The picture never leaves your Mac.</string>
 </dict></plist>
 PLIST
 # Signs with "Molt Local Signing" when it exists (scripts/make-signing-cert.sh), so macOS keeps

@@ -13,6 +13,25 @@ import SwiftUI
   @Published var hasNotch = true
   @Published var reveal: CGFloat = 0
   @Published private(set) var liveActivity = false
+  /// What's going on beside the closed notch, in your order; a swipe moves through them.
+  @Published private(set) var live: [LiveKind] = []
+  @Published var liveIndex = 0
+  /// What you've typed to jump somewhere, while the notch is open; nil when not searching.
+  @Published var jump: String?
+  @Published var jumpSelection = 0
+  /// Option is held: shortcuts show beside what they do.
+  @Published private(set) var optionHeld = false
+  /// A file or link is being dragged over Molt.
+  @Published private(set) var dropping = false
+  /// The pointer is resting on the closed notch: it swells a little before it opens.
+  @Published private(set) var peek: CGFloat = 0
+  /// The closed notch is being pressed.
+  @Published private(set) var pressed = false
+  /// The pointer is over a compact approval, which grows into the full card.
+  @Published var bannerHovered = false
+  /// An app is full screen on this display, so the closed notch keeps to itself.
+  @Published private(set) var fullScreen = false
+  let prefs = NotchPrefs.shared
   @Published var hoverToOpen = UserDefaults.standard.object(forKey: "islandHoverOpen") as? Bool ?? true {
     didSet { UserDefaults.standard.set(hoverToOpen, forKey: "islandHoverOpen") }
   }
@@ -23,14 +42,12 @@ import SwiftUI
   private var keys: [UInt32: EventHotKeyRef] = [:]
   /// Outward flare where the panel meets the menu bar, and the lower corner radius.
   static let flare: CGFloat = 14
-  private let controller: PetController
+  let controller: PetController
   let lens: LensController
   let health = HealthDetailController()
   private var panel: FloatingPanel?
-  private var lensKey: EventHotKeyRef?
   private var screen: NSScreen?
   private var previousApp: NSRunningApplication?
-  private var hotKey: EventHotKeyRef?
   private var handler: EventHandlerRef?
   private var hoverTimer: Timer?
   private var hoverSince: Date?
@@ -40,6 +57,14 @@ import SwiftUI
   var dragging: Bool { NSEvent.pressedMouseButtons != 0 }
   private var resize: Task<Void, Never>?
   private var subscriptions = Set<AnyCancellable>()
+  private var monitors: [Any] = []
+  private var swipe: CGFloat = 0
+  private var dragCount = NSPasteboard(name: .drag).changeCount
+  /// The page to go back to when a drag leaves without dropping.
+  private var beforeDrop: String?
+  /// A drop target took the drop; it closes things itself once it's done.
+  private var dropClaimed = false
+  private var releasedAt: Date?
   init(controller: PetController, preview: Bool = false) {
     self.controller = controller
     lens = LensController(assistant: controller.assistant)
@@ -59,6 +84,8 @@ import SwiftUI
     panel.level = .statusBar
     panel.hidesOnDeactivate = false
     panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+    panel.ignoresMouseEvents = true
+    panel.acceptsMouseMovedEvents = true
     panel.delegate = self
     panel.contentView = NSHostingView(
       rootView: IslandView(controller: controller, coordinator: self))
@@ -87,13 +114,15 @@ import SwiftUI
     let media = controller.hub.media
     let actions = controller.hub.actions
     let agents = controller.agents
-    media.$isPlaying.combineLatest(media.$track, actions.$recording, agents.$live.combineLatest(agents.$pending.map(\.count)))
-      .map { playing, track, recording, agentState in
-        (playing && track != nil) || recording != nil || agentState.1 > 0
-          || agentState.0.values.contains { $0.status == .working || $0.status == .needsYou }
-      }
-      .removeDuplicates()
-      .sink { [weak self] active in self?.setLiveActivity(active) }
+    Publishers.MergeMany(
+      media.$isPlaying.map { _ in () }.eraseToAnyPublisher(), media.$track.map { _ in () }.eraseToAnyPublisher(),
+      actions.$recording.map { _ in () }.eraseToAnyPublisher(), agents.$live.map { _ in () }.eraseToAnyPublisher(),
+      agents.$pending.map { _ in () }.eraseToAnyPublisher(), controller.$organization.map { _ in () }.eraseToAnyPublisher(),
+      controller.$health.map { _ in () }.eraseToAnyPublisher(), prefs.$priority.map { _ in () }.eraseToAnyPublisher(),
+      prefs.$petReacts.map { _ in () }.eraseToAnyPublisher(), prefs.$liveOff.map { _ in () }.eraseToAnyPublisher(),
+      prefs.$featuresOff.map { _ in () }.eraseToAnyPublisher())
+      .debounce(for: .milliseconds(30), scheduler: RunLoop.main)
+      .sink { [weak self] in self?.refreshLive() }
       .store(in: &subscriptions)
     lens.hide = { [weak self] in self?.collapse() }
     lens.openChat = { [weak controller] in controller?.tab = "Ask Molt" }
@@ -115,13 +144,33 @@ import SwiftUI
       .store(in: &subscriptions)
     bridgeSetup()
     bridgeAgents()
-    controller.$tab.removeDuplicates().dropFirst()
-      .sink { [weak self] _ in Task { @MainActor [weak self] in self?.fitToContent() } }
+    let hub = controller.hub
+    hub.timers.onAlert = { [weak self] text, symbol in self?.present(.notice(text, symbol: symbol == "alarm" ? "alarm.fill" : "timer")) }
+    hub.daily.onBreak = { [weak self, weak controller] text, symbol in
+      controller?.mood = symbol == "drop.fill" ? "drinking" : "happy"
+      self?.present(.notice(text, symbol: symbol))
+    }
+    hub.daily.onHabitStreak = { [weak controller] habit in
+      controller?.poked = Date()
+      if habit.streak(at: Date()) >= 3 { controller?.mood = "celebrating" }
+    }
+    if prefs.has("clipboard") { hub.clipboard.start() }
+    prefs.$featuresOff.map { !$0.contains("clipboard") }.removeDuplicates()
+      .sink { [weak hub] on in if on { hub?.clipboard.start() } else { hub?.clipboard.stop() } }
       .store(in: &subscriptions)
+    // The open notch fits what's on the page: the tab, the Hub's rows, search results.
+    Publishers.MergeMany(
+      controller.$tab.removeDuplicates().map { _ in () }.eraseToAnyPublisher(),
+      controller.hub.$saved.map { _ in () }.eraseToAnyPublisher(), controller.hub.$editing.map { _ in () }.eraseToAnyPublisher(),
+      $jump.map { _ in () }.eraseToAnyPublisher(), prefs.$fitContent.map { _ in () }.eraseToAnyPublisher())
+      .dropFirst()
+      .sink { [weak self] in Task { @MainActor [weak self] in self?.updateHitTesting() } }
+      .store(in: &subscriptions)
+    $jump.map { $0 == nil }.removeDuplicates().sink { [weak self] _ in self?.jumpSelection = 0 }.store(in: &subscriptions)
+    watchInput()
     reposition()
     controller.dashboardVisible = false
-    panel.orderOut(nil)
-    hoverTimer = Timer.scheduledTimer(withTimeInterval: 0.08, repeats: true) { [weak self] _ in
+    hoverTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
       Task { @MainActor [weak self] in self?.trackPointer() }
     }
     hoverTimer?.tolerance = 0.03
@@ -131,17 +180,60 @@ import SwiftUI
 
   /// Height of the band beside the hardware notch; the header lives here.
   var headerHeight: CGFloat { hasNotch ? max(28, safeTop) : 34 }
-  /// Every page shares Home's footprint.
+  /// Home's footprint; with "Fit to content" off, no page is smaller.
   static let bodyHeight: CGFloat = 176
-  var expandedSize: CGSize { CGSize(width: 720, height: headerHeight + Self.bodyHeight) }
+  /// One row of Hub widgets, and the space around the rows.
+  static let hubRow: CGFloat = 152, hubGap: CGFloat = 10
+  var expandedSize: CGSize { CGSize(width: bodyWidth(for: controller.tab), height: headerHeight + bodyHeight(for: controller.tab)) }
+  /// Narrow pages make a narrower notch, as in the mockups.
+  func bodyWidth(for route: String) -> CGFloat {
+    guard controller.account.phase == .signedIn, prefs.fitContent else { return 720 }
+    if jump != nil { return 600 }
+    switch route {
+    case "Focus": return 640
+    case "Drop": return 600
+    default: return 720
+    }
+  }
+  func bodyHeight(for route: String) -> CGFloat {
+    guard controller.account.phase == .signedIn else { return Self.bodyHeight }
+    if let query = jump { return JumpView.height(results: jumpResults(query).count) }
+    let height: CGFloat
+    switch route {
+    case "Hub":
+      // While editing, an empty row can show where another widget could go.
+      let rows = HubView.rows(controller.hub.layout, editing: controller.hub.editing, limit: controller.hub.rows).count
+      height = 20 + CGFloat(rows) * Self.hubRow + CGFloat(rows - 1) * Self.hubGap
+    case "Focus": height = 170
+    case "Drop": height = 166
+    case "AddWidget": height = 300
+    case "NotchSettings": height = 214
+    default: height = Self.bodyHeight
+    }
+    return prefs.fitContent ? height : max(Self.bodyHeight, height)
+  }
+  /// Each kind of live activity needs a little more or less room beside the notch.
+  var wing: CGFloat {
+    guard liveActivity, let kind = currentLive else { return 0 }
+    switch kind {
+    case .focus: return 86
+    case .battery: return 96
+    default: return headerHeight + 8
+    }
+  }
+  var currentLive: LiveKind? { live.isEmpty ? nil : live[liveIndex % live.count] }
   var collapsedSize: CGSize {
     if banner != nil { return bannerSize }
-    let wing = liveActivity ? headerHeight + 8 : 0
-    return CGSize(width: notchWidth + 2 * wing, height: hasNotch ? headerHeight : 0)
+    let wing = fullScreen ? 0 : self.wing
+    return CGSize(width: notchWidth + 2 * wing + 14 * peek, height: (hasNotch ? headerHeight : 0) + 3 * peek)
   }
   var bannerSize: CGSize { size(for: banner) }
   func size(for banner: IslandBanner?) -> CGSize {
     var height: CGFloat = 58
+    if banner?.isApproval == true, prefs.compactApprovals, !bannerHovered, !expanded {
+      // A pill beside the notch: who's asking, and Allow or Deny.
+      return CGSize(width: notchWidth + 2 * 150, height: headerHeight)
+    }
     if banner?.isApproval == true {
       // Questions need room for their options; edits for their diff.
       let item = controller.agents.pending.first
@@ -150,55 +242,64 @@ import SwiftUI
     }
     return CGSize(width: min(680, max(notchWidth + 380, 600)), height: headerHeight + height)
   }
-  private var reducedMotion: Bool {
+  var reducedMotion: Bool {
     controller.companion.preferences.reducedMotion || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
   }
-  private func frame(for size: CGSize) -> CGRect? {
-    guard let screen else { return nil }
-    return IslandGeometry.frame(
-      screen: screen.frame, visible: screen.visibleFrame,
-      size: CGSize(width: size.width + 2 * Self.flare, height: size.height))
+  /// The window is this big and never moves: only the notch drawn inside it changes, so nothing
+  /// jumps while it animates. Everywhere outside the notch lets clicks through.
+  static let canvas = CGSize(width: 720 + 2 * flare + 96, height: 640)
+  /// Where the notch is drawn right now, in screen coordinates.
+  var shapeRect: CGRect {
+    guard let screen else { return .zero }
+    let size = booting ? bootSize : expanded ? expandedSize : collapsedSize
+    let width = max(size.width, hasNotch ? notchWidth : 0) + 2 * Self.flare
+    let height = max(size.height, hasNotch ? headerHeight : 6)
+    return CGRect(x: screen.frame.midX - width / 2, y: screen.frame.maxY - height, width: width, height: height)
+  }
+  enum Motion { case open, close, morph, peek, press }
+  /// The springs everything moves with; nil with Reduce Motion on.
+  func animation(_ motion: Motion) -> Animation? {
+    guard !reducedMotion else { return nil }
+    let speed = prefs.animationSpeed
+    switch motion {
+    case .open: return .spring(response: 0.5 / speed, dampingFraction: 0.8)
+    case .close: return .spring(response: 0.34 / speed, dampingFraction: 1).delay(0.04)
+    case .morph: return .spring(response: 0.42 / speed, dampingFraction: 0.86)
+    case .peek: return .spring(response: 0.3 / speed, dampingFraction: 0.68)
+    case .press: return .spring(response: 0.18, dampingFraction: 0.6)
+    }
+  }
+  func animate(_ motion: Motion, _ change: @escaping () -> Void) {
+    if let animation = animation(motion) { withAnimation(animation, change) } else { change() }
   }
 
   // MARK: Shortcut
 
+  /// Registers every shortcut, from your bindings in Settings › Shortcuts (or the defaults).
+  /// Allow and Deny exist only while an approval waits.
   func registerShortcut() {
     for (_, key) in keys { UnregisterEventHotKey(key) }
     keys = [:]
-    if let hotKey { UnregisterEventHotKey(hotKey); self.hotKey = nil }
-    if let lensKey { UnregisterEventHotKey(lensKey); self.lensKey = nil }
     UserDefaults.standard.set(shortcutChoice, forKey: "islandShortcut")
-    let result = RegisterEventHotKey(
-      UInt32(kVK_Return), UInt32(cmdKey | shiftKey), EventHotKeyID(signature: 0x4D4F_4C54, id: 1),
-      GetApplicationEventTarget(), 0, &hotKey)
-    RegisterEventHotKey(
-      UInt32(kVK_ANSI_L), UInt32(cmdKey | shiftKey), EventHotKeyID(signature: 0x4D4F_4C54, id: 2),
-      GetApplicationEventTarget(), 0, &lensKey)
-    for (id, key) in Self.extraShortcuts { register(id, key) }
-    shortcutMessage =
-      result == noErr
-      ? "⌘⇧↩ opens Molt · ⌘⇧L asks about your screen"
-      : "Shortcut unavailable (\(result)). Use the menu bar to open Molt."
+    let open = register(1)
+    for action in HotKeys.actions where action.id != 1 && action.id != 10 && action.id != 11 { register(action.id) }
+    if !controller.agents.pending.isEmpty { register(10); register(11) }
+    let lens = HotKeys.describe(HotKeys.binding(2))
+    shortcutMessage = open
+      ? "\(HotKeys.describe(HotKeys.binding(1))) opens Molt · \(lens) asks about your screen"
+      : "That shortcut is taken by another app. Choose another in Settings › Shortcuts."
   }
-  /// Control-Option shortcuts for each part of Molt. Allow and Deny exist only while an approval waits.
-  static let extraShortcuts: [(UInt32, Int)] = [(3, kVK_ANSI_C), (4, kVK_ANSI_W), (5, kVK_ANSI_A), (6, kVK_ANSI_U), (7, kVK_ANSI_G), (8, kVK_ANSI_H)]
   static var shortcutList: [(String, String)] {
-    let mod = NSWorkspace.shared.isVoiceOverEnabled ? "⌃⌥⌘" : "⌃⌥"
-    return [
-      ("⌘⇧↩", "Open Molt"), ("⌘⇧L", "Ask about your screen"), (mod + "C", "Chat"), (mod + "A", "Agents"), (mod + "U", "Plan usage"),
-      (mod + "G", "GitHub"), (mod + "W", "Wardrobe"), (mod + "H", "Hub"), (mod + "Y", "Allow an approval"), (mod + "N", "Deny an approval"),
-    ]
+    HotKeys.actions.map { (HotKeys.describe(HotKeys.binding($0.id)), $0.title) }
   }
-  /// Control-Option is VoiceOver's own modifier; with VoiceOver on, Molt adds Command.
-  static var modifiers: UInt32 {
-    UInt32(NSWorkspace.shared.isVoiceOverEnabled ? controlKey | optionKey | cmdKey : controlKey | optionKey)
-  }
-  private func register(_ id: UInt32, _ key: Int) {
-    guard keys[id] == nil else { return }
+  @discardableResult private func register(_ id: UInt32) -> Bool {
+    guard keys[id] == nil, let binding = HotKeys.binding(id) else { return false }
     var ref: EventHotKeyRef?
-    if RegisterEventHotKey(UInt32(key), Self.modifiers, EventHotKeyID(signature: 0x4D4F_4C54, id: id), GetApplicationEventTarget(), 0, &ref) == noErr, let ref {
+    if RegisterEventHotKey(UInt32(binding.key), binding.modifiers, EventHotKeyID(signature: 0x4D4F_4C54, id: id), GetApplicationEventTarget(), 0, &ref) == noErr, let ref {
       keys[id] = ref
+      return true
     }
+    return false
   }
   private func unregister(_ id: UInt32) {
     if let ref = keys.removeValue(forKey: id) { UnregisterEventHotKey(ref) }
@@ -213,6 +314,8 @@ import SwiftUI
     case 6: UserDefaults.standard.set("Usage", forKey: "agentsTab"); show("Agents")
     case 7: UserDefaults.standard.set("GitHub", forKey: "agentsTab"); show("Agents")
     case 8: show("Hub")
+    case 12: controller.focus(minutes: UserDefaults.standard.object(forKey: "focusMinutes") as? Int ?? 25); show("Focus")
+    case 13: show("Hub")
     case 10: if let item = controller.agents.pending.first { controller.agents.allow(item.id) }
     case 11: if let item = controller.agents.pending.first { controller.agents.deny(item.id) }
     default: break
@@ -273,6 +376,22 @@ import SwiftUI
 
   // MARK: Agents and banners
 
+  /// For screenshots: the wake-up animation, `seconds` in.
+  func preview(bootAt seconds: Double) {
+    expanded = false
+    booting = true
+    reveal = 1
+    bootStarted = Date().addingTimeInterval(-seconds)
+  }
+  /// For screenshots: live activities beside the closed notch.
+  func preview(live kinds: [LiveKind], index: Int = 0) {
+    banner = nil
+    expanded = false
+    reveal = 0
+    live = kinds
+    liveIndex = index
+    liveActivity = !kinds.isEmpty
+  }
   /// For screenshots: a banner over the closed notch, or over the open page.
   func preview(banner: IslandBanner?, expanded: Bool = false) {
     self.banner = banner
@@ -294,8 +413,8 @@ import SwiftUI
         Task { @MainActor [weak self] in
           guard let self else { return }
           if count > 0 {
-            self.register(10, kVK_ANSI_Y)
-            self.register(11, kVK_ANSI_N)
+            self.register(10)
+            self.register(11)
           } else {
             self.unregister(10)
             self.unregister(11)
@@ -328,20 +447,9 @@ import SwiftUI
     if case .finished = next, controller.focusing { return }
     if case .message = next, controller.focusing { return }
     bannerTimer?.cancel()
-    if !expanded, let panel, let target = frame(for: size(for: next)) {
-      resize?.cancel()
-      // Grow the window first so the content can animate into it.
-      if target.height >= panel.frame.height || target.width >= panel.frame.width { panel.setFrame(target, display: true) }
-      panel.orderFrontRegardless()
-    }
-    animate(response: 0.45, damping: 0.78) { self.banner = next }
-    if !expanded, let panel, let target = frame(for: size(for: next)), panel.frame != target {
-      resize = Task { @MainActor [weak self] in
-        try? await Task.sleep(nanoseconds: 450_000_000)
-        guard let self, !Task.isCancelled, !self.expanded, self.banner == next else { return }
-        panel.setFrame(target, display: true)
-      }
-    }
+    bannerHovered = false
+    animate(.open) { self.banner = next }
+    updateHitTesting()
     if !next.isApproval {
       bannerTimer = Task { @MainActor [weak self] in
         try? await Task.sleep(nanoseconds: 7_000_000_000)
@@ -359,94 +467,187 @@ import SwiftUI
       present(.approval(controller.agents.pending[0].id))
       return
     }
-    animate(response: 0.36, damping: 0.92) { self.banner = nil }
-    if !expanded { settle(after: reducedMotion ? 0 : 0.4) }
+    animate(.close) { self.banner = nil; self.bannerHovered = false }
+    updateHitTesting()
   }
 
   // MARK: Open and close
 
   func open(hover: Bool = false) {
     guard let panel else { return }
-    resize?.cancel()
     if !expanded {
       openedByHover = hover
       if !hover { previousApp = NSWorkspace.shared.frontmostApplication }
     } else if !hover {
       openedByHover = false
     }
-    expanded = true
     outsideSince = nil
     controller.dashboardVisible = true
     controller.hub.media.active = true
     controller.refreshHealth()
-    if let target = frame(for: expandedSize) { panel.setFrame(target, display: true) }
     panel.orderFrontRegardless()
     if !hover {
       panel.makeKey()
       NSApp.activate(ignoringOtherApps: true)
     }
-    animate(response: 0.42, damping: 0.8) { self.reveal = 1 }
+    if !expanded {
+      // The shape springs open; the header and page follow a beat later (see IslandView).
+      animate(.open) {
+        self.expanded = true
+        self.reveal = 1
+        self.peek = 0
+        self.pressed = false
+      }
+    }
+    updateHitTesting()
   }
   func collapse() {
     guard expanded else { return }
-    expanded = false
     controller.hub.editing = false
+    jump = nil
+    dropping = false
+    dropClaimed = false
+    beforeDrop = nil
     openedByHover = false
     controller.dashboardVisible = false
     controller.hub.media.active = false
-    animate(response: 0.36, damping: 0.92) { self.reveal = 0 }
-    settle(after: reducedMotion ? 0 : 0.4)
+    // The page fades first, then the shape settles back without a bounce.
+    if reducedMotion {
+      expanded = false
+      reveal = 0
+    } else {
+      withAnimation(.easeOut(duration: 0.1)) { expanded = false }
+      animate(.close) { self.reveal = 0 }
+    }
     if NSWorkspace.shared.frontmostApplication?.processIdentifier
       == ProcessInfo.processInfo.processIdentifier
     {
       previousApp?.activate(options: [])
     }
     panel?.resignKey()
+    updateHitTesting()
   }
-  private func animate(response: Double, damping: Double, _ change: @escaping () -> Void) {
-    if reducedMotion { change() } else { withAnimation(.spring(response: response, dampingFraction: damping), change) }
+  /// Puts the window over the top of the screen, once per display change.
+  private func placePanel() {
+    guard let panel, let screen else { return }
+    let size = CGSize(width: min(Self.canvas.width, screen.frame.width), height: min(Self.canvas.height, screen.frame.height * 0.8))
+    let frame = IslandGeometry.frame(screen: screen.frame, visible: screen.frame, size: size)
+    if panel.frame != frame { panel.setFrame(frame, display: true) }
+    panel.orderFrontRegardless()
+    updateHitTesting()
   }
-  /// After a closing animation, shrink the window to the live activity or hide it.
-  private func settle(after delay: Double) {
-    resize?.cancel()
-    resize = Task { @MainActor [weak self] in
-      if delay > 0 { try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) }
-      guard let self, !Task.isCancelled, !self.expanded, let panel = self.panel else { return }
-      if self.liveActivity || self.banner != nil, let target = self.frame(for: self.collapsedSize) {
-        panel.setFrame(target, display: true)
-        panel.orderFrontRegardless()
-      } else {
-        panel.orderOut(nil)
-      }
+  /// Clicks reach the notch only where it's drawn; everywhere else they pass to the app below.
+  func updateHitTesting() {
+    guard let panel else { return }
+    let inside = shapeRect.insetBy(dx: -2, dy: -2).contains(NSEvent.mouseLocation) || dropping || overlayActive
+    if panel.ignoresMouseEvents == inside { panel.ignoresMouseEvents = !inside }
+  }
+  var overlayActive: Bool { false }
+  /// Molt's wake-up animation is playing.
+  @Published private(set) var booting = false
+  private(set) var bootStarted = Date()
+  private var bootTask: Task<Void, Never>?
+  private var afterBoot: (() -> Void)?
+  /// The tour is running: the notch stays open while you click its speech bubbles.
+  var touring = false
+  /// Where the tabs and tools are drawn, in the window, for the tour to point at.
+  var anchors: [String: CGRect] = [:]
+  var bootSize: CGSize { CGSize(width: 420, height: headerHeight + 170) }
+  /// Plays the wake-up animation, then runs `then`. With Reduce Motion on, it goes straight on.
+  func boot(then: @escaping () -> Void = {}) {
+    guard let panel, !reducedMotion else { then(); return }
+    bootStarted = Date()
+    afterBoot = then
+    panel.orderFrontRegardless()
+    animate(.open) {
+      self.booting = true
+      self.reveal = 1
+    }
+    updateHitTesting()
+    bootTask = Task { @MainActor [weak self] in
+      try? await Task.sleep(nanoseconds: UInt64(BootView.length * 1_000_000_000))
+      guard !Task.isCancelled else { return }
+      self?.finishBoot()
     }
   }
-  /// Grows the window before content expands; shrinks only after content has animated in.
-  private func fitToContent() {
-    guard expanded, let panel, let target = frame(for: expandedSize) else { return }
-    if target.height >= panel.frame.height {
-      resize?.cancel()
-      panel.setFrame(target, display: true)
-    } else {
-      resize?.cancel()
-      resize = Task { @MainActor [weak self] in
-        try? await Task.sleep(nanoseconds: 400_000_000)
-        guard let self, !Task.isCancelled, self.expanded, let panel = self.panel,
-          let target = self.frame(for: self.expandedSize)
-        else { return }
-        panel.setFrame(target, display: true)
+  func finishBoot() {
+    guard booting else { return }
+    bootTask?.cancel()
+    let next = afterBoot
+    afterBoot = nil
+    withAnimation(.easeOut(duration: 0.14)) { booting = false }
+    if !expanded { animate(.close) { self.reveal = 0 } }
+    updateHitTesting()
+    next?()
+  }
+  /// Brings the notch in front of the tour's dimming, so it stays clickable.
+  func raisePanel() { panel?.orderFrontRegardless() }
+  /// An anchor reported by the island view, in screen coordinates.
+  func screenRect(_ anchor: String) -> CGRect? {
+    guard let panel, let rect = anchors[anchor] else { return nil }
+    return CGRect(x: panel.frame.minX + rect.minX, y: panel.frame.maxY - rect.maxY, width: rect.width, height: rect.height)
+  }
+  /// Works out what's going on, in your order, and fits the closed notch to the one showing.
+  private func refreshLive() {
+    let agents = controller.agents, media = controller.hub.media
+    var active = Set<LiveKind>()
+    if agents.needsYou || !agents.working.isEmpty { active.insert(.agents) }
+    if controller.hub.actions.recording != nil { active.insert(.recording) }
+    if controller.organization.sessions.contains(where: { $0.finished == nil }) { active.insert(.focus) }
+    if media.isPlaying && media.track != nil { active.insert(.music) }
+    if controller.lowBattery { active.insert(.battery) }
+    active = active.filter { !prefs.liveOff.contains($0.rawValue) && prefs.shows($0.rawValue) }
+    if active.contains(.battery) && !live.contains(.battery) && !batteryNoted {
+      batteryNoted = true
+      present(.notice("\(controller.petName)'s running low with your Mac. Plug in to wake it up.", symbol: "battery.25"))
+    } else if !controller.lowBattery {
+      batteryNoted = false
+    }
+    let next = NotchLayout.live(active, priority: prefs.priority)
+    let shown = currentLive
+    // Something more important than what's showing comes to the front.
+    var index = 0
+    if let first = next.first, live.contains(first), let shown, let at = next.firstIndex(of: shown) { index = at }
+    if next != live || index != liveIndex {
+      animate(.morph) {
+        self.live = next
+        self.liveIndex = index
       }
     }
+    setLiveActivity(!next.isEmpty)
+    updateHitTesting()
+  }
+  /// Shows the next live activity, after a swipe on the closed notch.
+  func cycleLive(_ step: Int) {
+    guard live.count > 1 else { return }
+    animate(.morph) { self.liveIndex = (self.liveIndex + step + self.live.count) % self.live.count }
+    updateHitTesting()
   }
   private func setLiveActivity(_ playing: Bool) {
     let show = playing && hasNotch
     guard show != liveActivity else { return }
-    if show, !expanded, banner == nil, let panel, let target = frame(for: CGSize(width: notchWidth + 2 * (headerHeight + 8), height: headerHeight)) {
-      resize?.cancel()
-      panel.setFrame(target, display: true)
-      panel.orderFrontRegardless()
+    animate(.morph) { self.liveActivity = show }
+  }
+  /// Whether the app in front is full screen on the notch's display.
+  private func checkFullScreen() {
+    guard prefs.hideInFullScreen, let screen, !expanded else {
+      if fullScreen { animate(.morph) { self.fullScreen = false } }
+      return
     }
-    animate(response: 0.4, damping: 0.8) { self.liveActivity = show }
-    if !expanded && !show { settle(after: reducedMotion ? 0 : 0.4) }
+    let mine = ProcessInfo.processInfo.processIdentifier
+    let front = NSWorkspace.shared.frontmostApplication?.processIdentifier
+    let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+    // The primary display's top-left origin, for converting Quartz window bounds.
+    let primary = NSScreen.screens.first?.frame.height ?? screen.frame.height
+    let target = CGRect(x: screen.frame.minX, y: primary - screen.frame.maxY, width: screen.frame.width, height: screen.frame.height)
+    let covering = list.contains { info in
+      guard (info[kCGWindowLayer as String] as? Int) == 0, let pid = info[kCGWindowOwnerPID as String] as? pid_t,
+        pid != mine, pid == front, let bounds = info[kCGWindowBounds as String] as? [String: CGFloat]
+      else { return false }
+      let rect = CGRect(x: bounds["X"] ?? 0, y: bounds["Y"] ?? 0, width: bounds["Width"] ?? 0, height: bounds["Height"] ?? 0)
+      return rect.equalTo(target)
+    }
+    if covering != fullScreen { animate(.morph) { self.fullScreen = covering } }
   }
 
   // MARK: Hover
@@ -455,14 +656,42 @@ import SwiftUI
     guard let screen, let panel else { return }
     let mouse = NSEvent.mouseLocation
     let now = Date()
+    let pressed = NSEvent.pressedMouseButtons != 0
+    let board = NSPasteboard(name: .drag)
+    if !pressed { dragCount = board.changeCount }
+    // A file or link dragged up to the notch opens it to catch the drop.
+    if pressed, board.changeCount != dragCount, controller.account.phase == .signedIn,
+      board.canReadObject(forClasses: [NSURL.self], options: nil)
+    {
+      let size = expanded ? expandedSize : collapsedSize
+      let width = max(size.width, hasNotch ? notchWidth + 120 : 260) + 2 * Self.flare
+      let height = expanded ? size.height : (hasNotch ? headerHeight : 4) + 24
+      let zone = CGRect(x: screen.frame.midX - width / 2, y: screen.frame.maxY - height, width: width, height: height + 1)
+      if zone.contains(mouse) && !dropping { startDrop() }
+    } else if dropping && !pressed && !dropClaimed {
+      // Released somewhere other than one of the drop targets. A drop is delivered a moment after
+      // the button comes up, so wait briefly before giving up on it.
+      if let releasedAt, now.timeIntervalSince(releasedAt) > 0.35 { endDrop() } else if releasedAt == nil { releasedAt = now }
+    }
+    if pressed { releasedAt = nil }
+    updateHitTesting()
+    if Int(now.timeIntervalSinceReferenceDate * 12.5) % 12 == 0 { checkFullScreen() }
     if !expanded {
-      guard hoverToOpen, banner == nil, NSEvent.pressedMouseButtons == 0 else { hoverSince = nil; return }
       let size = collapsedSize
       let width = max(size.width, hasNotch ? notchWidth : 200) + 2 * Self.flare
-      let height = hasNotch ? headerHeight : 4
+      let height = max(size.height, hasNotch ? headerHeight : 4)
       let zone = CGRect(x: screen.frame.midX - width / 2, y: screen.frame.maxY - height, width: width, height: height + 1)
-      if zone.contains(mouse) {
-        if let since = hoverSince, now.timeIntervalSince(since) > 0.12 {
+      let over = zone.contains(mouse) && !pressed && !booting
+      // A compact approval grows into the full card while the pointer is on it.
+      if banner?.isApproval == true && prefs.compactApprovals {
+        let card = shapeRect.insetBy(dx: -10, dy: -10)
+        if (over || card.contains(mouse)) != bannerHovered { animate(.morph) { self.bannerHovered.toggle() } }
+      }
+      let peeks = over && banner == nil && (hoverToOpen || prefs.openOnClick)
+      if (peeks ? 1 : 0) != peek { animate(.peek) { self.peek = peeks ? 1 : 0 } }
+      guard hoverToOpen, banner == nil, !pressed else { hoverSince = nil; return }
+      if over {
+        if let since = hoverSince, now.timeIntervalSince(since) > prefs.hoverDelay {
           hoverSince = nil
           controller.tab = "Notch"
           open(hover: true)
@@ -473,7 +702,7 @@ import SwiftUI
         hoverSince = nil
       }
     } else if openedByHover, !panel.isKeyWindow, !dragging {
-      if panel.frame.insetBy(dx: -8, dy: -8).contains(mouse) {
+      if shapeRect.insetBy(dx: -8, dy: -8).contains(mouse) {
         outsideSince = nil
       } else if let since = outsideSince, now.timeIntervalSince(since) > 0.3 {
         collapse()
@@ -482,6 +711,111 @@ import SwiftUI
       }
     }
   }
+
+  // MARK: Dropping on Molt
+
+  private func startDrop() {
+    dropping = true
+    if controller.tab != "Drop" { beforeDrop = expanded ? controller.tab : nil }
+    jump = nil
+    controller.tab = "Drop"
+    if !expanded { open(hover: true) }
+  }
+  /// A drop target calls this as soon as something lands on it.
+  func claimDrop() { dropClaimed = true }
+  /// After a drop, or when a drag ends elsewhere: back to the page you were on, or closed.
+  func endDrop(keepOpen: Bool = false) {
+    guard dropping else { return }
+    dropping = false
+    dropClaimed = false
+    releasedAt = nil
+    if let page = beforeDrop {
+      controller.tab = page
+    } else if !keepOpen {
+      collapse()
+    }
+    beforeDrop = nil
+  }
+  /// The Share menu for dropped items, under the notch.
+  func share(_ urls: [URL]) {
+    guard let view = panel?.contentView, !urls.isEmpty else { return }
+    let picker = NSSharingServicePicker(items: urls)
+    let bottom = view.isFlipped ? expandedSize.height : view.bounds.maxY - expandedSize.height
+    let rect = NSRect(x: view.bounds.midX - 1, y: bottom, width: 2, height: 2)
+    picker.show(relativeTo: rect, of: view, preferredEdge: .minY)
+  }
+
+  // MARK: Typing, Option and swipes
+
+  private func watchInput() {
+    monitors.append(NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+      guard let self else { return event }
+      return self.key(event) ? nil : event
+    } as Any)
+    monitors.append(NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+      let held = event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .option
+      if self?.optionHeld != held { self?.optionHeld = held }
+      return event
+    } as Any)
+    monitors.append(NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+      guard let self, !self.expanded, self.banner == nil, event.window === self.panel else { return event }
+      if event.phase == .began || event.phase == .mayBegin { self.swipe = 0; self.pull = 0; self.swipeLocked = false }
+      // One step per gesture: after it acts, the rest of it (and its momentum) is ignored.
+      if !self.swipeLocked {
+        self.swipe += event.scrollingDeltaX
+        // Fingers moving down, whichever way scrolling is set.
+        self.pull += event.isDirectionInvertedFromDevice ? event.scrollingDeltaY : -event.scrollingDeltaY
+        if abs(self.swipe) > 24 && abs(self.swipe) > abs(self.pull) && self.live.count > 1 {
+          self.cycleLive(self.swipe < 0 ? 1 : -1)
+          self.swipeLocked = true
+        } else if self.pull > 18 && self.prefs.openOnScroll {
+          self.controller.tab = "Notch"
+          self.open()
+          self.swipeLocked = true
+        }
+      }
+      if event.phase == .ended || event.phase == .cancelled { self.swipe = 0; self.pull = 0 }
+      if event.momentumPhase == .ended { self.swipeLocked = false }
+      return nil
+    } as Any)
+    monitors.append(NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp]) { [weak self] event in
+      guard let self, event.window === self.panel, !self.expanded, self.banner == nil else { return event }
+      let down = event.type == .leftMouseDown
+      if down != self.pressed { self.animate(.press) { self.pressed = down } }
+      return event
+    } as Any)
+    // Clicks pass through everywhere but the notch; this keeps that exact as the pointer moves.
+    let moved: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged]
+    monitors.append(NSEvent.addGlobalMonitorForEvents(matching: moved) { [weak self] _ in self?.updateHitTesting() } as Any)
+    monitors.append(NSEvent.addLocalMonitorForEvents(matching: moved) { [weak self] event in self?.updateHitTesting(); return event } as Any)
+  }
+  private var swipeLocked = false
+  private var batteryNoted = false
+  private var pull: CGFloat = 0
+  /// Handles a key press in the open notch. Returns true when it was used.
+  private func key(_ event: NSEvent) -> Bool {
+    guard expanded, let panel, event.window === panel, controller.account.phase == .signedIn else { return false }
+    let mods = event.modifierFlags.intersection([.command, .control])
+    if jump != nil {
+      switch event.keyCode {
+      case 125: jumpSelection += 1; return true
+      case 126: jumpSelection = max(0, jumpSelection - 1); return true
+      case 53: jump = nil; return true
+      default: return false
+      }
+    }
+    guard prefs.typeToJump, mods.isEmpty, !(panel.firstResponder is NSText),
+      let characters = event.characters, characters.count == 1,
+      let scalar = characters.unicodeScalars.first,
+      CharacterSet.alphanumerics.contains(scalar)
+    else { return false }
+    // Pages that are mostly typing, or a game, keep their keys.
+    guard !["Ask Molt", "Lens", "Play"].contains(controller.tab), !dropping else { return false }
+    jump = characters
+    return true
+  }
+  /// Everything you can jump to, built fresh as the notch changes.
+  func jumpResults(_ query: String) -> [JumpItem] { JumpSearch.rank(query, JumpCatalog.items(controller: controller), limit: 5) }
 
   @objc func reposition() {
     let screens = NSScreen.screens
@@ -500,16 +834,12 @@ import SwiftUI
       hasNotch = false
       notchWidth = 200
     }
-    if expanded, let target = frame(for: expandedSize) {
-      panel?.setFrame(target, display: true)
-    } else {
-      if !hasNotch && liveActivity { liveActivity = false }
-      settle(after: 0)
-    }
+    if !hasNotch && liveActivity { liveActivity = false }
+    placePanel()
   }
   func windowDidResignKey(_ notification: Notification) {
-    // Native file pickers own focus temporarily; never collapse beneath them.
-    guard expanded, NSApp.modalWindow == nil, panel?.attachedSheet == nil else { return }
+    // Native file pickers own focus temporarily; never collapse beneath them, or under the tour.
+    guard expanded, !touring, NSApp.modalWindow == nil, panel?.attachedSheet == nil else { return }
     collapse()
   }
 }
@@ -524,6 +854,7 @@ struct IslandView: View {
   @ObservedObject var hub: HubController
   @ObservedObject var actions: QuickActions
   @ObservedObject var agents: AgentController
+  @ObservedObject var prefs: NotchPrefs
   @AppStorage("islandAccent") private var accent = "blue"
   @Environment(\.accessibilityReduceMotion) private var systemReduced
   private var reduced: Bool { controller.companion.preferences.reducedMotion || systemReduced }
@@ -547,52 +878,92 @@ struct IslandView: View {
     self.hub = controller.hub
     self.actions = controller.hub.actions
     self.agents = controller.agents
+    self.prefs = coordinator.prefs
   }
+  /// Pages one level down: a back arrow and their name replace the tabs.
+  static let subpages: [String: (title: String, parent: String)] = [
+    "Focus": ("Focus", "Notch"), "Health": ("Mac health", "Notch"), "Wardrobe": ("Wardrobe", "Play"),
+    "NotchSettings": ("Notch", "Settings"), "Drop": ("Drop it on Molt", "Notch"), "AddWidget": ("Add a widget", "Hub"),
+  ]
   var body: some View {
     let reveal = coordinator.reveal
     let collapsed = coordinator.collapsedSize
-    let target = coordinator.expandedSize
+    let target = coordinator.booting ? coordinator.bootSize : coordinator.expandedSize
     let flare = IslandCoordinator.flare
     let width = collapsed.width + (target.width - collapsed.width) * reveal
     let height = collapsed.height + (target.height - collapsed.height) * reveal
-    let shape = NotchShape(topRadius: flare * (0.6 + 0.4 * reveal), bottomRadius: 10 + 16 * reveal)
-    ZStack(alignment: .top) {
-      shape.fill(Color.black)
-      if let banner = coordinator.banner, !coordinator.expanded {
-        VStack(spacing: 0) {
-          Color.clear.frame(height: coordinator.hasNotch ? coordinator.headerHeight : 6)
-          IslandBannerView(
-            banner: banner, agents: agents, appearance: controller.companion.appearance,
-            dismiss: { coordinator.dismissBanner() },
-            open: { route in UserDefaults.standard.set(route, forKey: "agentsTab"); controller.tab = "Agents"; coordinator.open() })
-        }
-        .frame(width: collapsed.width, height: collapsed.height, alignment: .top)
-        .transition(.opacity.combined(with: .scale(scale: 0.94, anchor: .top)))
-      } else if coordinator.liveActivity && !coordinator.expanded && actions.recording == nil
-        && (agents.needsYou || !agents.working.isEmpty)
-      {
-        AgentWings(agents: agents, appearance: controller.companion.appearance, notchWidth: coordinator.notchWidth, height: collapsed.height)
-          .frame(width: collapsed.width, height: collapsed.height)
-          .contentShape(Rectangle())
-          .onTapGesture { UserDefaults.standard.set("Live", forKey: "agentsTab"); controller.tab = "Agents"; coordinator.open() }
-          .transition(.opacity)
-      } else if coordinator.liveActivity && !coordinator.expanded {
-        NotchLiveActivity(media: media, actions: actions, notchWidth: coordinator.notchWidth, height: collapsed.height)
-          .frame(width: collapsed.width, height: collapsed.height)
-          .contentShape(Rectangle())
-          .onTapGesture {
-            if actions.recording != nil { actions.stopRecording() } else { controller.tab = "Notch"; coordinator.open() }
+    let corner = CGFloat(prefs.cornerScale)
+    let shape = NotchShape(topRadius: flare * (0.6 + 0.4 * reveal), bottomRadius: 10 + (26 * corner - 10) * reveal)
+    let collapsedClosed = !coordinator.expanded && coordinator.banner == nil
+    VStack(spacing: 0) {
+      ZStack(alignment: .top) {
+        shape.fill(Color.black)
+        if let banner = coordinator.banner, !coordinator.expanded {
+          if banner.isApproval && prefs.compactApprovals && !coordinator.bannerHovered {
+            CompactApproval(agents: agents, appearance: controller.companion.appearance, notchWidth: coordinator.notchWidth, height: collapsed.height)
+              .frame(width: collapsed.width, height: collapsed.height)
+              .transition(.opacity)
+          } else {
+            VStack(spacing: 0) {
+              Color.clear.frame(height: coordinator.hasNotch ? coordinator.headerHeight : 6)
+              IslandBannerView(
+                banner: banner, agents: agents, appearance: controller.companion.appearance,
+                dismiss: { coordinator.dismissBanner() },
+                open: { route in UserDefaults.standard.set(route, forKey: "agentsTab"); controller.tab = "Agents"; coordinator.open() })
+            }
+            .frame(width: collapsed.width, height: collapsed.height, alignment: .top)
+            .transition(.opacity.combined(with: .scale(scale: 0.94, anchor: .top)))
           }
-          .transition(.opacity)
+        } else if coordinator.liveActivity && !coordinator.expanded && !coordinator.fullScreen, let kind = coordinator.currentLive {
+          liveWings(kind, height: collapsed.height)
+            .frame(width: collapsed.width, height: collapsed.height)
+            .contentShape(Rectangle())
+            .onTapGesture { openLive(kind) }
+            .help(coordinator.live.count > 1 ? "Swipe sideways on the notch to see what else is going on" : "")
+            .id(kind)
+            .transition(.asymmetric(insertion: .opacity.combined(with: .offset(y: -4)), removal: .opacity))
+        } else if collapsedClosed && prefs.openOnClick {
+          // The bare notch: a click opens Home.
+          Color.clear.contentShape(Rectangle())
+            .frame(width: collapsed.width + 2 * flare, height: max(collapsed.height, 6))
+            .onTapGesture { controller.tab = "Notch"; coordinator.open() }
+        }
+        if coordinator.booting {
+          BootView(appearance: controller.companion.appearance, started: coordinator.bootStarted, top: coordinator.hasNotch ? coordinator.headerHeight - 10 : 0)
+            .frame(width: target.width, height: target.height)
+            .onTapGesture { coordinator.finishBoot() }
+            .transition(.opacity)
+        } else if coordinator.expanded {
+          expandedContent
+            .frame(width: target.width, height: target.height, alignment: .top)
+            .transition(.asymmetric(insertion: .identity, removal: .opacity))
+        }
       }
-      if coordinator.expanded {
-        expandedContent
-          .frame(width: target.width, height: target.height, alignment: .top)
-          .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
+      .frame(width: width + 2 * flare, height: max(0, height), alignment: .top)
+      .clipShape(shape)
+      // A soft shadow that grows as the notch opens.
+      .background(alignment: .top) {
+        shape.fill(Color.black)
+          .frame(width: width + 2 * flare, height: max(0, height))
+          .shadow(color: .black.opacity(0.34 * reveal), radius: 24 * reveal, y: 12 * reveal)
+      }
+      .overlay {
+        if coordinator.dropping {
+          shape.stroke(MoltTheme.body(controller.companion.appearance.palette).opacity(0.55), lineWidth: 1.5)
+            .frame(width: width + 2 * flare, height: max(0, height))
+            .transition(.opacity)
+        }
+      }
+      .scaleEffect(coordinator.pressed ? 0.97 : 1, anchor: .top)
+      // Which of several things beside the notch is showing; swipe for the others.
+      if collapsedClosed && coordinator.liveActivity && !coordinator.fullScreen && coordinator.live.count > 1 {
+        LiveDots(count: coordinator.live.count, index: coordinator.liveIndex % coordinator.live.count)
+          .padding(.top, 6)
+          .transition(.opacity.combined(with: .offset(y: -3)))
       }
     }
-    .frame(width: width + 2 * flare, height: max(0, height), alignment: .top)
-    .clipShape(shape)
+    .animation(coordinator.animation(.morph), value: target)
+    .animation(coordinator.animation(.morph), value: collapsed)
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     .environment(\.moltReducedMotion, controller.companion.preferences.reducedMotion)
     .environment(\.colorScheme, .dark)
@@ -600,6 +971,7 @@ struct IslandView: View {
     .tint(MoltTheme.accent(accent))
     .accentColor(MoltTheme.accent(accent))
     .onChange(of: coordinator.displayChoice) { _ in coordinator.reposition() }
+    .onPreferenceChange(AnchorKey.self) { coordinator.anchors = $0 }
     .onExitCommand { coordinator.collapse() }
     .onDrop(of: [.fileURL], isTargeted: nil) { providers in
       guard let provider = providers.first else { return false }
@@ -617,10 +989,23 @@ struct IslandView: View {
 
   private var expandedContent: some View {
     VStack(spacing: 0) {
-      header.frame(height: coordinator.headerHeight)
-      page
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .modifier(NotchPageMotion(route: controller.tab))
+      if signedIn && coordinator.jump != nil {
+        // Searching: the band beside the notch stays clear, as in the mockup.
+        Color.clear.frame(height: coordinator.headerHeight)
+      } else if controller.tab != "Drop" || !signedIn {
+        header.frame(height: coordinator.headerHeight)
+          .modifier(Entrance(delay: 0.05, motion: coordinator.animation(.open)))
+      }
+      Group {
+        if signedIn, let query = coordinator.jump {
+          JumpView(coordinator: coordinator, query: Binding(get: { coordinator.jump ?? query }, set: { coordinator.jump = $0 }))
+            .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
+        } else {
+          page.modifier(NotchPageMotion(route: controller.tab))
+        }
+      }
+      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+      .modifier(Entrance(delay: 0.11, motion: coordinator.animation(.open)))
     }
     .foregroundStyle(.white)
     .buttonStyle(NotchButtonStyle())
@@ -664,6 +1049,7 @@ struct IslandView: View {
       }
     }
     .animation(motion, value: controller.tab)
+    .animation(motion, value: coordinator.jump == nil)
     .animation(motion, value: controller.error)
     .animation(motion, value: social.invites)
     .animation(motion, value: coordinator.banner)
@@ -687,6 +1073,10 @@ struct IslandView: View {
     case "Wardrobe": WardrobeView(controller: controller)
     case "Ask Molt": PersonalChatView(assistant: assistant)
     case "Settings": SettingsView(controller: controller, coordinator: coordinator, accent: $accent)
+    case "NotchSettings": NotchSettingsView(prefs: prefs, coordinator: coordinator)
+    case "Focus": FocusPage(controller: controller)
+    case "Drop": DropPage(controller: controller, coordinator: coordinator, hub: hub)
+    case "AddWidget": WidgetGallery(controller: controller, hub: hub, prefs: prefs)
     default: NotchHomeView(controller: controller, media: media)
     }
   }
@@ -694,11 +1084,28 @@ struct IslandView: View {
   private var header: some View {
     HStack(spacing: 0) {
       HStack(spacing: 4) {
-        if signedIn {
-          ForEach(Self.tabs, id: \.route) { tab in tabButton(tab.route, tab.title, tab.icon) }
+        if signedIn, let sub = Self.subpages[controller.tab] {
+          Button { if controller.tab == "Drop" { coordinator.endDrop(keepOpen: true) }; controller.tab = sub.parent } label: {
+            HStack(spacing: 4) {
+              Image(systemName: "chevron.left").font(.system(size: 10, weight: .bold))
+              Text(Self.title(of: sub.parent)).font(.system(size: 12, weight: .medium))
+            }
+            .foregroundStyle(Color.white.opacity(0.6)).padding(.horizontal, 8).frame(height: 24).contentShape(Capsule())
+          }
+          .buttonStyle(.plain).help("Back").accessibilityLabel("Back to \(Self.title(of: sub.parent))")
+          Rectangle().fill(Color.white.opacity(0.16)).frame(width: 1, height: 12).padding(.horizontal, 2)
+          Text(sub.title).font(.system(size: 12, weight: .semibold)).lineLimit(1).padding(.leading, 4)
+            .transition(.opacity.combined(with: .move(edge: .leading)))
+        } else if signedIn {
+          HStack(spacing: 4) {
+          ForEach(prefs.visibleTabs, id: \.self) { route in
+            if let tab = Self.tabs.first(where: { $0.route == route }) { tabButton(tab.route, tab.title, tab.icon) }
+          }
           if !Self.tabs.contains(where: { $0.route == controller.tab }) && !Self.tools.contains(where: { $0.route == controller.tab }) {
             tabButton(controller.tab, controller.tab, "chevron.right")
           }
+          }
+          .anchor("tabs")
         } else {
           Label("Molt", systemImage: "leaf.fill").font(.system(size: 12, weight: .semibold)).padding(.leading, 6)
         }
@@ -719,8 +1126,21 @@ struct IslandView: View {
           .help(hub.editing ? "Done" : "Edit widgets").accessibilityLabel(hub.editing ? "Done editing" : "Edit widgets")
           .padding(.trailing, 4)
         }
-        if signedIn {
-          ForEach(Self.tools, id: \.route) { tool in
+        if signedIn, Self.subpages[controller.tab] != nil {
+          if controller.tab == "AddWidget" {
+            HStack(spacing: 5) {
+              Image(systemName: "magnifyingglass").font(.system(size: 10, weight: .semibold)).foregroundStyle(Color.white.opacity(0.5))
+              TextField("Search \(WidgetKind.catalog.filter { prefs.shows($0.id) }.count) widgets", text: $hub.pickerQuery)
+                .textFieldStyle(.plain).font(.system(size: 11.5))
+            }
+            .padding(.horizontal, 10).frame(width: 160, height: 26)
+            .background(Capsule().fill(Color.white.opacity(0.08)))
+            .padding(.trailing, 6)
+          }
+          PageMenu(route: controller.tab, controller: controller, prefs: prefs)
+        } else if signedIn {
+          HStack(spacing: 2) {
+          ForEach(Self.tools.filter { prefs.shows($0.route) }, id: \.route) { tool in
             Button { controller.tab = tool.route } label: {
               Image(systemName: tool.icon).font(.system(size: 12, weight: .semibold))
             }
@@ -735,10 +1155,37 @@ struct IslandView: View {
             .help(tool.title).accessibilityLabel(tool.title)
             .accessibilityAddTraits(controller.tab == tool.route ? .isSelected : [])
           }
+          }
+          .anchor("tools")
         }
       }.frame(maxWidth: .infinity)
     }
     .padding(.horizontal, 14)
+  }
+  static func title(of route: String) -> String {
+    tabs.first { $0.route == route }?.title ?? tools.first { $0.route == route }.map { $0.route == "Ask Molt" ? "Chat" : $0.route } ?? route
+  }
+  @ViewBuilder private func liveWings(_ kind: LiveKind, height: CGFloat) -> some View {
+    switch kind {
+    case .agents:
+      AgentWings(agents: agents, appearance: controller.companion.appearance, notchWidth: coordinator.notchWidth, height: height)
+    case .focus:
+      FocusWings(controller: controller, notchWidth: coordinator.notchWidth, height: height)
+    case .battery:
+      BatteryWings(controller: controller, notchWidth: coordinator.notchWidth, height: height)
+    case .recording, .music:
+      NotchLiveActivity(media: media, actions: actions, notchWidth: coordinator.notchWidth, height: height, showRecording: kind == .recording)
+    }
+  }
+  private func openLive(_ kind: LiveKind) {
+    switch kind {
+    case .agents: UserDefaults.standard.set("Live", forKey: "agentsTab"); controller.tab = "Agents"
+    case .recording: actions.stopRecording(); return
+    case .focus: controller.tab = "Focus"
+    case .battery: controller.tab = "Health"
+    case .music: controller.tab = "Notch"
+    }
+    coordinator.open()
   }
   /// The selected tab shows its name; the others are icons, so four fit beside the notch.
   private func tabButton(_ route: String, _ title: String, _ icon: String) -> some View {

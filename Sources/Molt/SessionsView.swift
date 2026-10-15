@@ -128,29 +128,36 @@ struct SessionsView: View {
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     .background(NotchSurface(radius: 14))
   }
+  private func diffLine(_ line: Substring) -> some View {
+    let tint: Color = line.hasPrefix("+") ? .green : line.hasPrefix("-") ? .red : line.hasPrefix("@@") ? .accentColor : Color.white.opacity(0.7)
+    let fill: Color = line.hasPrefix("+") ? .green : line.hasPrefix("-") ? .red : .clear
+    return Text(String(line)).font(.system(size: 10, design: .monospaced)).lineLimit(1)
+      .foregroundStyle(tint)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .background(fill.opacity(0.08))
+  }
+  private var changesHeader: some View {
+    HStack(spacing: 6) {
+      Button { if sessions.diff != nil { sessions.closeDiff() } else { showingChanges = false } } label: {
+        Image(systemName: "chevron.left").font(.system(size: 10, weight: .semibold))
+      }.buttonStyle(NotchIconButtonStyle(size: 20)).accessibilityLabel("Back")
+      Text(sessions.diff?.path ?? "Files changed").font(.system(size: 12, weight: .semibold)).lineLimit(1).truncationMode(.head)
+      Spacer(minLength: 4)
+      if sessions.loadingChanges { ProgressView().controlSize(.mini) }
+      if sessions.diff == nil && !sessions.changes.isEmpty {
+        Text("+\(sessions.changes.reduce(0) { $0 + $1.added })").font(.system(size: 10, weight: .semibold).monospacedDigit()).foregroundStyle(.green)
+        Text("−\(sessions.changes.reduce(0) { $0 + $1.removed })").font(.system(size: 10, weight: .semibold).monospacedDigit()).foregroundStyle(.red)
+      }
+    }
+  }
   private var changesPanel: some View {
     VStack(alignment: .leading, spacing: 6) {
-      HStack(spacing: 6) {
-        Button { if sessions.diff != nil { sessions.closeDiff() } else { showingChanges = false } } label: {
-          Image(systemName: "chevron.left").font(.system(size: 10, weight: .semibold))
-        }.buttonStyle(NotchIconButtonStyle(size: 20)).accessibilityLabel("Back")
-        Text(sessions.diff?.path ?? "Files changed").font(.system(size: 12, weight: .semibold)).lineLimit(1).truncationMode(.head)
-        Spacer(minLength: 4)
-        if sessions.loadingChanges { ProgressView().controlSize(.mini) }
-        let added = sessions.changes.reduce(0) { $0 + $1.added }, removed = sessions.changes.reduce(0) { $0 + $1.removed }
-        if sessions.diff == nil && !sessions.changes.isEmpty {
-          Text("+\(added)").font(.system(size: 10, weight: .semibold).monospacedDigit()).foregroundStyle(.green)
-          Text("−\(removed)").font(.system(size: 10, weight: .semibold).monospacedDigit()).foregroundStyle(.red)
-        }
-      }
+      changesHeader
       ScrollView {
         if let diff = sessions.diff {
           LazyVStack(alignment: .leading, spacing: 0) {
             ForEach(Array(diff.text.split(separator: "\n", omittingEmptySubsequences: false).prefix(1500).enumerated()), id: \.offset) { _, line in
-              Text(String(line)).font(.system(size: 10, design: .monospaced)).lineLimit(1)
-                .foregroundStyle(line.hasPrefix("+") ? Color.green : line.hasPrefix("-") ? Color.red : line.hasPrefix("@@") ? Color.accentColor : Color.white.opacity(0.7))
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background((line.hasPrefix("+") ? Color.green : line.hasPrefix("-") ? Color.red : Color.clear).opacity(0.08))
+              diffLine(line)
             }
           }.textSelection(.enabled)
         } else {

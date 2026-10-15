@@ -33,6 +33,10 @@ import SwiftUI
   @Published private(set) var position: Double = 0
   @Published private(set) var positionDate = Date()
   @Published private(set) var permissionNeeded = false
+  /// The next songs, when the player can say: Spotify (connected in Molt) or an Apple Music playlist.
+  @Published private(set) var upNext: [QueueItem] = []
+  struct QueueItem: Equatable { var title: String; var artist: String }
+  private var queueKey: String?
   weak var spotify: SpotifyAccount?
   /// True while the notch is open; position is polled only then.
   var active = false {
@@ -176,11 +180,55 @@ import SwiftUI
       position = seconds
       positionDate = Date()
     }
+    refreshQueue()
     refresh()
   }
+  /// Looks up what's playing next whenever the song changes.
+  private func refreshQueue() {
+    guard let player, let track else { upNext = []; queueKey = nil; return }
+    let key = "\(player.rawValue)|\(track.title)|\(track.artist)"
+    guard key != queueKey else { return }
+    queueKey = key
+    switch player {
+    case .music:
+      queue.async {
+        let text = (try? Self.run(Self.queueScript).get()) ?? ""
+        let items = text.split(separator: "\n").compactMap { line -> QueueItem? in
+          let parts = line.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
+          return parts.first.map { QueueItem(title: $0, artist: parts.count > 1 ? parts[1] : "") }
+        }.filter { !$0.title.isEmpty }
+        Task { @MainActor in if self.queueKey == key { self.upNext = items } }
+      }
+    case .spotify, .spotifyConnect:
+      guard let spotify else { upNext = []; return }
+      Task {
+        let items = await spotify.upNext()
+        if self.queueKey == key { self.upNext = items }
+      }
+    }
+  }
+  /// The songs after the current one in the Apple Music playlist it's playing from.
+  nonisolated private static let queueScript = """
+    tell application "Music"
+      set out to ""
+      try
+        set p to current playlist
+        set i to index of current track
+        set n to count of tracks of p
+        repeat with k from (i + 1) to (i + 3)
+          if k > n then exit repeat
+          set t to track k of p
+          set out to out & (name of t) & tab & (artist of t) & linefeed
+        end repeat
+      end try
+      return out
+    end tell
+    """
   private func clear() {
     player = nil
     track = nil
+    upNext = []
+    queueKey = nil
     isPlaying = false
     artwork = nil
     artworkKey = nil
@@ -239,6 +287,7 @@ import SwiftUI
     isPlaying = snapshot.playing
     position = snapshot.position
     positionDate = Date()
+    refreshQueue()
     let key = "\(source.rawValue)|\(snapshot.track.title)|\(snapshot.track.album)|\(snapshot.track.artist)"
     guard key != artworkKey else { return }
     artworkKey = key

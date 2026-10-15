@@ -62,9 +62,11 @@ struct PetLane: View {
     GeometryReader { proxy in
       let size = CGSize(width: 42, height: 39)
       TimelineView(.animation(minimumInterval: 1 / 30, paused: reduced)) { context in
-        let mood = controller.displayMood
-        // Molt stays put while it works, waits on you or sleeps.
-        let still = ["sleeping", "working", "alert", "tired"].contains(mood)
+        let base = controller.displayMood
+        // With music on and nothing else going on, Molt dances in place.
+        let mood = ["idle", "happy"].contains(base) && controller.hub.media.isPlaying && !reduced ? "dancing" : base
+        // Molt stays put while it works, waits on you, sleeps or dances.
+        let still = ["sleeping", "working", "alert", "tired", "dancing"].contains(mood)
         let _ = walk.step(now: context.date, width: proxy.size.width - size.width, liveliness: controller.liveliness, resting: still)
         CreatureView(
           appearance: controller.companion.appearance, mood: mood,

@@ -59,7 +59,7 @@ struct SettingsView: View {
           get: { SMAppService.mainApp.status == .enabled }, set: { controller.setLogin($0) }))
       }
       column("Notch & Mac") {
-        toggle("Open on hover", $coordinator.hoverToOpen)
+        link("Notch layout", symbol: "rectangle.topthird.inset.filled") { controller.tab = "NotchSettings" }
         toggle("Mac health", $controller.healthEnabled)
         toggle("Calendar", Binding(get: { controller.organization.consent.calendar }, set: setCalendar))
         toggle("App usage", Binding(
@@ -104,17 +104,7 @@ struct SettingsView: View {
             }
           }.labelsHidden().controlSize(.small).frame(width: 110)
         }
-        link("Keyboard shortcuts", symbol: "keyboard") { showingShortcuts.toggle() }
-          .popover(isPresented: $showingShortcuts, arrowEdge: .bottom) {
-            VStack(alignment: .leading, spacing: 5) {
-              ForEach(IslandCoordinator.shortcutList, id: \.0) { item in
-                HStack {
-                  Text(item.0).font(.system(size: 11, weight: .semibold, design: .rounded)).frame(width: 44, alignment: .leading)
-                  Text(item.1).font(.system(size: 11))
-                }
-              }
-            }.padding(12)
-          }
+        link("All settings…", symbol: "slider.horizontal.3") { SettingsWindow.shared.show() }
         connection("Spotify", connected: spotify.connected, detail: spotify.userName,
           connect: { controller.tab = "Notch"; controller.hub.library.source = .spotify },
           disconnect: spotify.disconnect)

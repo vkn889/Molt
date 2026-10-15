@@ -3,43 +3,66 @@ import MoltCore
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The Hub: four slots of widgets you choose, like a Home Screen. Edit with the pencil in the
-/// header or by holding a widget; drag to reorder, and use the badges to remove or resize.
+/// The Hub: up to two rows of four slots of widgets you choose, like a Home Screen. Edit with
+/// the pencil in the header or by holding a widget; drag to reorder, and use the badges to
+/// remove or resize. The notch grows a row when the second one is in use.
 struct HubView: View {
   @ObservedObject var controller: PetController
   @ObservedObject var hub: HubController
-  @State private var picking: Int?
   @State private var configuring: UUID?
   @State private var dropTarget: UUID?
-  static let gap: CGFloat = 12
+  static let gap: CGFloat = 10
   var body: some View {
     GeometryReader { proxy in
       let unit = (proxy.size.width - Self.gap * CGFloat(HubLayout.capacity - 1)) / CGFloat(HubLayout.capacity)
       let layout = hub.layout
-      HStack(spacing: Self.gap) {
-        ForEach(layout) { widget in
-          tile(widget)
-            .frame(width: unit * CGFloat(widget.span) + Self.gap * CGFloat(widget.span - 1))
-        }
-        ForEach(0..<max(0, HubLayout.capacity - HubLayout.used(layout)), id: \.self) { index in
-          emptySlot(at: layout.count + index).frame(width: unit)
+      let rows = Self.rows(layout, editing: hub.editing, limit: hub.rows)
+      VStack(spacing: IslandCoordinator.hubGap) {
+        ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+          HStack(spacing: Self.gap) {
+            ForEach(row.widgets) { widget in
+              tile(widget)
+                .frame(width: unit * CGFloat(widget.span) + Self.gap * CGFloat(widget.span - 1))
+            }
+            ForEach(0..<row.empty, id: \.self) { index in
+              emptySlot(at: row.end).frame(width: unit)
+            }
+          }
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .frame(height: IslandCoordinator.hubRow)
+          .transition(.opacity.combined(with: .move(edge: .bottom)))
         }
       }
-      .frame(maxHeight: .infinity)
+      .frame(maxHeight: .infinity, alignment: .top)
       .animation(.spring(response: 0.32, dampingFraction: 0.82), value: layout)
+      .animation(.spring(response: 0.32, dampingFraction: 0.82), value: rows.count)
     }
-    .padding(.horizontal, 22).padding(.top, 8).padding(.bottom, 14)
+    .padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 12)
     .overlay {
-      if let slot = picking {
-        WidgetPicker(hub: hub, room: HubLayout.capacity - HubLayout.used(hub.layout)) { kind in
-          hub.add(kind, at: slot)
-          picking = nil
-        } close: { picking = nil }
-      } else if let id = configuring, let widget = hub.layout.first(where: { $0.id == id }) {
+      if let id = configuring, let widget = hub.layout.first(where: { $0.id == id }) {
         ShortcutsEditor(widget: widget, hub: hub, actions: hub.actions) { configuring = nil }
       }
     }
-    .onChange(of: hub.editing) { editing in if !editing { picking = nil; configuring = nil } }
+    .onChange(of: hub.editing) { editing in if !editing { configuring = nil } }
+  }
+
+  struct Row { var widgets: [HubWidget]; var empty: Int; var end: Int }
+  /// The rows to draw: the layout's rows with their empty slots, and while editing, an empty row
+  /// where another widget could go. A row that has a later row after it shows no empty slots.
+  static func rows(_ layout: [HubWidget], editing: Bool, limit: Int) -> [Row] {
+    var result: [Row] = []
+    var index = 0
+    let rows = HubLayout.rows(layout)
+    for (number, row) in rows.enumerated() {
+      index += row.count
+      let last = number == rows.count - 1
+      result.append(Row(widgets: row, empty: last ? HubLayout.capacity - HubLayout.used(row) : 0, end: index))
+    }
+    if result.isEmpty { result.append(Row(widgets: [], empty: HubLayout.capacity, end: 0)) }
+    if editing && rows.count < limit && result.last?.empty == 0 {
+      result.append(Row(widgets: [], empty: HubLayout.capacity, end: layout.count))
+    }
+    return result
   }
 
   @ViewBuilder private func tile(_ widget: HubWidget) -> some View {
@@ -78,7 +101,11 @@ struct HubView: View {
   }
 
   private func emptySlot(at index: Int) -> some View {
-    Button { picking = index } label: {
+    Button {
+      hub.pickerSlot = index
+      hub.pickerQuery = ""
+      controller.tab = "AddWidget"
+    } label: {
       RoundedRectangle(cornerRadius: 16, style: .continuous)
         .strokeBorder(Color.white.opacity(hub.editing ? 0.25 : 0.1), style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
         .overlay(Image(systemName: "plus").font(.system(size: 18, weight: .medium)).foregroundStyle(Color.white.opacity(0.5)))
@@ -144,50 +171,90 @@ private struct WidgetDrop: DropDelegate {
   }
 }
 
-/// Choose a widget to add. Sizes that don't fit in the remaining space are hidden.
-struct WidgetPicker: View {
+/// Adding a widget, as in the mockup: browse by kind or search (in the header), what's new is
+/// marked, and a click adds it where you chose.
+struct WidgetGallery: View {
+  @ObservedObject var controller: PetController
   @ObservedObject var hub: HubController
-  var room: Int
-  var choose: (WidgetKind) -> Void
-  var close: () -> Void
+  @ObservedObject var prefs: NotchPrefs
   var body: some View {
+    let room = HubLayout.room(hub.layout, rows: hub.rows)
     let placed = Set(hub.layout.map(\.kind))
-    let kinds = WidgetKind.catalog.filter { kind in
-      (kind.id == "shortcuts" || !placed.contains(kind.id)) && kind.spans.contains { $0 <= room }
+    let available = WidgetKind.catalog.filter { kind in
+      prefs.shows(kind.id) && (kind.id == "shortcuts" || !placed.contains(kind.id))
     }
-    VStack(alignment: .leading, spacing: 8) {
-      HStack {
-        Text("Add a widget").font(.system(size: 13, weight: .semibold))
-        Text("\(room) \(room == 1 ? "slot" : "slots") free").font(.system(size: 11)).foregroundStyle(.secondary)
-        Spacer()
-        Button(action: close) { Image(systemName: "xmark").font(.system(size: 11, weight: .semibold)) }
-          .buttonStyle(NotchIconButtonStyle(size: 24)).accessibilityLabel("Close")
+    let query = hub.pickerQuery
+    let kinds = available.filter { kind in
+      (hub.pickerCategory == "All" || (hub.pickerCategory == "New" ? kind.badge != nil : kind.category == hub.pickerCategory))
+        && (query.isEmpty || kind.title.localizedCaseInsensitiveContains(query) || kind.blurb.localizedCaseInsensitiveContains(query))
+    }
+    VStack(alignment: .leading, spacing: 10) {
+      HStack(spacing: 8) {
+        if room == 0 {
+          Label("Your Hub is full. Remove a widget, or allow more rows in Hub settings.", systemImage: "info.circle")
+            .font(.system(size: 11.5, weight: .medium)).foregroundStyle(Color.orange).lineLimit(1)
+          Spacer()
+        }
+        ForEach(room == 0 ? [] : WidgetKind.categories, id: \.self) { name in
+          let count = name == "All" ? available.count : available.filter { name == "New" ? $0.badge != nil : $0.category == name }.count
+          if count > 0 { chip(name) }
+        }
       }
       ScrollView {
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 5), spacing: 8) {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 6), spacing: 10) {
           ForEach(kinds) { kind in
-            Button { choose(kind) } label: {
-              HStack(spacing: 8) {
-                Image(systemName: kind.symbol).font(.system(size: 15)).foregroundStyle(Color.accentColor).frame(width: 22)
-                VStack(alignment: .leading, spacing: 1) {
-                  Text(kind.title).font(.system(size: 11, weight: .semibold)).lineLimit(1)
-                  Text(kind.spans == [2] ? "Wide" : kind.spans.count > 1 ? "Small or wide" : "Small")
-                    .font(.system(size: 9)).foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 0)
-              }
-              .padding(.horizontal, 8).frame(height: 40)
-              .background(RoundedRectangle(cornerRadius: 10).fill(Color.white.opacity(0.07)))
-              .contentShape(RoundedRectangle(cornerRadius: 10))
-            }.buttonStyle(.plain).help(kind.blurb)
+            let fits = kind.spans.contains { $0 <= room }
+            Button { add(kind) } label: { tile(kind, fits: fits) }
+              .buttonStyle(.plain).disabled(!fits)
+              .help(fits ? kind.blurb : "No room. Remove a widget, or allow more rows in Settings.")
           }
+        }
+        if kinds.isEmpty {
+          Text(query.isEmpty ? "Everything here is already on your Hub." : "No widgets match \u{201C}\(query)\u{201D}.")
+            .font(.system(size: 12)).foregroundStyle(.secondary).frame(maxWidth: .infinity).padding(.top, 30)
         }
       }
     }
-    .padding(12)
-    .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color(white: 0.09)))
-    .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Color.white.opacity(0.1)))
-    .padding(.horizontal, 22).padding(.top, 8).padding(.bottom, 14)
+    .padding(.horizontal, 20).padding(.top, 4).padding(.bottom, 12)
+  }
+  private func chip(_ name: String) -> some View {
+    let selected = hub.pickerCategory == name
+    let green = Color(red: 0.36, green: 0.8, blue: 0.55)
+    return Button { withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) { hub.pickerCategory = name } } label: {
+      Text(name == "New" ? "New in 0.9.2" : name).font(.system(size: 12, weight: .semibold)).fixedSize()
+        .foregroundStyle(selected ? (name == "New" ? green : .white) : Color.white.opacity(0.55))
+        .padding(.horizontal, 11).frame(height: 26)
+        .background(Capsule().fill(selected ? (name == "New" ? green.opacity(0.2) : Color.white.opacity(0.14)) : Color.white.opacity(0.06)))
+    }.buttonStyle(.plain)
+  }
+  private func tile(_ kind: WidgetKind, fits: Bool) -> some View {
+    VStack(spacing: 8) {
+      Image(systemName: kind.symbol).font(.system(size: 19, weight: .medium)).foregroundStyle(kind.tint)
+        .frame(width: 40, height: 40)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.white.opacity(0.07)))
+      Text(kind.title).font(.system(size: 12, weight: .semibold)).lineLimit(1).minimumScaleFactor(0.8)
+    }
+    .frame(maxWidth: .infinity).frame(height: 104)
+    .background(NotchSurface(radius: 16))
+    .overlay(alignment: .topTrailing) {
+      if kind.badge != nil {
+        Text("NEW").font(.system(size: 8.5, weight: .heavy)).tracking(0.4).foregroundStyle(Color(red: 0.36, green: 0.8, blue: 0.55))
+          .padding(.top, 7).padding(.trailing, 8)
+      }
+    }
+    .overlay(alignment: .topLeading) {
+      Image(systemName: "plus").font(.system(size: 10, weight: .bold)).foregroundStyle(.white)
+        .frame(width: 18, height: 18).background(Circle().fill(Color.accentColor)).padding(6)
+    }
+    .opacity(fits ? 1 : 0.4)
+    .contentShape(Rectangle())
+  }
+  private func add(_ kind: WidgetKind) {
+    hub.add(kind, at: hub.pickerSlot)
+    hub.pickerSlot = nil
+    hub.pickerQuery = ""
+    hub.editing = true
+    controller.tab = "Hub"
   }
 }
 

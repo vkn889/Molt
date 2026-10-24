@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Hardened runtime entitlements for Developer ID builds. The hardened runtime blocks these by
+  default; each one is something Molt asks for and macOS still confirms with the person.
+  Nothing here weakens code signing: no JIT, unsigned memory, DYLD variables or library
+  validation exceptions. This is not the App Sandbox (see docs/distribution.md).
+-->
+<plist version="1.0"><dict>
+  <!-- Spotify, Apple Music, System Events and Finder via AppleScript. -->
+  <key>com.apple.security.automation.apple-events</key><true/>
+  <!-- Camera mirror widget. -->
+  <key>com.apple.security.device.camera</key><true/>
+  <!-- Calendar (read-only) and Reminders. -->
+  <key>com.apple.security.personal-information.calendars</key><true/>
+</dict></plist>

@@ -145,8 +145,16 @@ import SwiftUI
       return unpinned <= limit
     }
   }
-  private func save(_ image: NSImage) -> String? {
+  /// Clipboard history can hold anything you copied, so it stays out of Time Machine backups.
+  private func makeFolder() {
     try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    var values = URLResourceValues()
+    values.isExcludedFromBackup = true
+    var url = folder
+    try? url.setResourceValues(values)
+  }
+  private func save(_ image: NSImage) -> String? {
+    makeFolder()
     // Kept small: at most 1200 points on the long side.
     let scale = min(1, 1200 / max(image.size.width, image.size.height, 1))
     let size = NSSize(width: image.size.width * scale, height: image.size.height * scale)
@@ -159,7 +167,7 @@ import SwiftUI
     return (try? png.write(to: folder.appendingPathComponent(name), options: .atomic)) != nil ? name : nil
   }
   private func persist() {
-    try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    makeFolder()
     try? JSONEncoder().encode(items).write(to: folder.appendingPathComponent("history.json"), options: .atomic)
   }
 }

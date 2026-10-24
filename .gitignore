@@ -3,3 +3,10 @@
 .DS_Store
 dist/
 .build-xcode/
+# Signing and notarization material never goes in the repo.
+*.p12
+*.p8
+*.cer
+*.mobileprovision
+*.provisionprofile
+.env

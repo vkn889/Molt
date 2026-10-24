@@ -145,7 +145,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer ./scripts/package.sh 0.
 open dist/Molt.app
 ```
 
-The package script produces `dist/Molt-0.9.1.dmg` and an ad-hoc signed universal app. Ad-hoc signing is not Apple notarization.
+The package script produces `dist/Molt-0.9.1.dmg` and a universal app with the hardened runtime. With a Developer ID certificate and `MOLT_NOTARY_PROFILE` set, it also notarizes and staples both, so the DMG opens on other Macs without a Gatekeeper warning; without them the build only opens cleanly on the Mac that made it. See [`docs/distribution.md`](docs/distribution.md).
 
 The backend is a Supabase project; its schema and security rules are in [`supabase/migrations`](supabase/migrations). The app ships only the publishable key; row-level security decides what each signed-in user can read and write.
 

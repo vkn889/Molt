@@ -13,7 +13,7 @@ This release implements the roadmap’s connected offline foundation: identity a
 - Tasks are built-in first. Calendar is read-only. Reminder notifications are scheduled in a bounded queue (up to 60 upcoming occurrences, up to 16 per recurring reminder) refreshed on edits and app launch. Delivery depends on macOS. Reopen Molt to replenish very long unattended recurrence schedules.
 - App awareness records only public frontmost-app/session events and bounded intervals. It cannot prove productivity, detect all idle time, or reliably detect private browsing. Categories are user controlled, not inferred.
 - Imported packs contain JSON and a bounded PNG atlas, never executable content. The editor offers name/decay forms plus JSON and a one-hour simulation preview.
-- Launch-at-login is available through ServiceManagement for an installed app. Developer ID signing, notarization, auto-updates, screen/accessibility context, sync and an online directory remain future work. Optional Ollama and an app-managed local inference worker are implemented; hardware and clean-install qualification remain explicit release gates.
+- Launch-at-login is available through ServiceManagement for an installed app. Auto-updates, screen/accessibility context, sync and an online directory remain future work. Developer ID signing and notarization are set up in `distribution.md`. Optional Ollama and an app-managed local inference worker are implemented; hardware and clean-install qualification remain explicit release gates.
 
 ## Qualification still requiring hardware/user sessions
 

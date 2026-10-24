@@ -1,5 +1,6 @@
 import AppKit
 import MoltCore
+import Security
 import SwiftUI
 
 /// Your Claude and Codex plan limits: the 5-hour and weekly windows, and when you'd hit them at
@@ -61,10 +62,19 @@ import SwiftUI
   }
 
   /// Claude Code keeps its login in the keychain item "Claude Code-credentials". macOS asks you
-  /// before Molt can read it.
+  /// before Molt can read it. Asking through the Security framework, not the `security` tool,
+  /// means "Always Allow" trusts only Molt's signature, never every program that runs `security`.
   nonisolated private static func claudeToken() async -> String? {
-    let output = await QuickActions.output("/usr/bin/security", ["find-generic-password", "-s", "Claude Code-credentials", "-w"])
-    guard let data = output.trimmingCharacters(in: .whitespacesAndNewlines).data(using: .utf8),
+    let query: [String: Any] = [
+      kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: "Claude Code-credentials",
+      kSecReturnData as String: true, kSecMatchLimit as String: kSecMatchLimitOne,
+    ]
+    let found = await Task.detached(priority: .utility) { () -> Data? in
+      var item: CFTypeRef?
+      guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess else { return nil }
+      return item as? Data
+    }.value
+    guard let data = found,
       let row = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
       let oauth = row["claudeAiOauth"] as? [String: Any], let token = oauth["accessToken"] as? String, !token.isEmpty
     else { return nil }

@@ -21,6 +21,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true
       ).appendingPathComponent("Molt")
       try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+      // Pet, clipboard, agent and chat data stay readable by you only, not other accounts on this Mac.
+      try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: root.path)
       lockDescriptor = Darwin.open(
         root.appendingPathComponent(".instance-lock").path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
       guard lockDescriptor >= 0, flock(lockDescriptor, LOCK_EX | LOCK_NB) == 0 else {
